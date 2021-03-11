@@ -1117,6 +1117,7 @@ precis(m5h4, depth = 2)
 # "... and model selection does not help"
 # "because causal inference and making out-of-sample predictions are not the same thing!"
 
+### ** Some notes while reading
 
 m6.1 <- quap(
 alist(
@@ -1180,3 +1181,229 @@ S -> W -> D
 adjustmentSets( dag_6.2 , exposure="W" , outcome="D" )
 
 impliedConditionalIndependencies( dag_6.2 )
+
+### ** Practise problems
+
+### *** Difficulty level: Easy
+
+#6E1
+#Multicollinearity
+#Post-treatment bias 
+#Collider bias (two unrelated variables are both related to a third variable, inclusion of third variable in the model created statistical association between the two)
+
+#6E2
+
+#6E3
+#Fork: variable Z is a common cause of both X and Y, X is independent of Y conditional on Z
+#Pipe: X influences Z, which influences Y. X is independent of Y conditional on Z
+#Collider: variable X and variable Y both influence Z. X is not independent from Y conditional on Z
+#Descendant: X and Y both influence Z, and Z causes D. Z is a collider, so keeping Z out of the model but including D would cause partial collider bias.
+
+#6E4
+#With a collider an association is introduced between two variables, when a third variable is added. In the funding example there is conditioning on the selection status if we have data only on funded samples. Of course this is very tricky because the collider is not in the data!
+
+### *** Difficulty level: Medium
+library(dagitty)
+#6M1
+
+dag.m61 <- dagitty("dag{
+U [unobserved]
+V [unobserved]
+X -> Y
+X <- U -> B
+U <- A -> C
+B <- C -> Y
+C <- V -> Y
+}")
+
+coordinates(dag.m61) <- list(x = c(X=1, U = 1, A = 2, B=2, C=3, Y=3, V=3.5), y = c(X=1, U=2, A=2.5, B=1.5, C=2, Y=1, V=1.5))
+drawdag( dag.m61 )
+#Four paths from X to Y:
+#1. X <- U <- A -> C -> Y
+#2. X <- U -> B <- C -> Y
+#3. X <- U <- A -> C <- V -> Y
+#4. X <- U -> B <- C <- V -> Y
+
+#paths 2 and 4 are closed because B is a collider. Paths 1 and 3 are open because A is a fork.
+#We must condition on A
+adjustmentSets(dag.m61, exposure = "X", outcome = "Y") #{A}
+
+#6M2
+x <- rnorm(100)
+z <- rnorm(100, mean = x, sd = 0.3)
+y <- rnorm(100, mean = z)
+
+x <- scale(x)
+z <- scale(z)
+y <- scale(y)
+
+d <- data.frame(y, x ,z)
+
+m6m2 <- quap(
+    alist(
+        y ~ dnorm(mu, sigma),
+        mu <- a + bX*x + bZ*z,
+        a ~ dnorm(0, 0.2),
+        bX ~ dnorm(0, 0.5),
+        bZ ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)),
+    data = d)
+
+precis(m6m2)
+
+#No multicollinearity observed, multicollinearity depends on the causal model
+
+#6M3
+#upper left
+dag1 <- dagitty("dag{X -> Y; X <- Z -> Y; Z <- A -> Y}")
+adjustmentSets(dag1, exposure = "X", outcome = "Y") #Need to condition on Z
+
+#upper right
+dag2 <- dagitty("dag{Z <- X -> Y; Z -> Y; Z <- A -> Y}")
+adjustmentSets(dag2, exposure = "X", outcome = "Y") #No need to include anything
+
+#bottom left
+dag3 <- dagitty("dag{Z <- X -> Y; Z <- Y; X <- A -> Z}")
+adjustmentSets(dag3, exposure = "X", outcome = "Y") #No need to include anything
+
+#bottom right
+dag4 <- dagitty("dag{Y <- X -> Z; Y <- Z; X <- A -> Z}")
+adjustmentSets(dag4, exposure = "X", outcome = "Y") #Need to condition on A
+
+### *** Difficulty level: Hard
+
+#6H1
+#Find the causal influence on Waffle Houses on divorce rate
+
+#Using the DAG from the chapter
+waffle_dag <- dagitty("dag { S -> W -> D <- A <- S -> M -> D; A -> M }")
+drawdag(waffle_dag)
+
+adjustmentSets(waffle_dag, exposure = "W", outcome = "D") #We need to condition either on S or both A and M
+#Lets use only S
+
+data(WaffleDivorce)
+d <- list()
+d$A <- scale(WaffleDivorce$MedianAgeMarriage)
+d$D <- scale(WaffleDivorce$Divorce)
+d$M <- scale(WaffleDivorce$Marriage)
+d$W <- scale(WaffleDivorce$WaffleHouses)
+d$S <- WaffleDivorce$South
+
+m6h1 <- quap(
+    alist(
+        D ~ dnorm(mu, sigma),
+        mu <- a + bW*W + bS*S,
+        a ~ dnorm(0, 0.2),
+        bW ~ dnorm(0, 0.5),
+        bS ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)), data = d)
+
+precis(m6h1)
+
+#Estimate of bW overlaps with zero. No causal influence of waffle houses on divorce
+
+#6H2
+impliedConditionalIndependencies(waffle_dag)
+#A _||_ W | S
+#D _||_ S | A, M, W
+#M _||_ W | S
+
+cond1 <- quap(
+    alist(
+        A ~ dnorm(mu, sigma),
+        mu <- a + bW*W + bS*S,
+        a ~ dnorm(0, 0.2),
+        bW ~ dnorm(0, 0.5),
+        bS ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)), data = d)
+
+precis(cond1) #This is okay, waffles do not influenge age of marriage
+
+cond2 <- quap(
+    alist(
+        D ~ dnorm(mu, sigma),
+        mu <- a + bS*S + bW*W + bA*A + bM*M,
+        a ~ dnorm(0, 0.2),
+        bW ~ dnorm(0, 0.5),
+        bS ~ dnorm(0, 0.5),
+        bA ~ dnorm(0, 0.5),
+        bM ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)), data = d)
+
+precis(cond2) #This is borderline, as S does overlap with zero, but is still slightly positive. We probably have not taken everything else into account (education etc.).
+
+cond3 <- quap(
+    alist(
+        M ~ dnorm(mu, sigma),
+        mu <- a + bW*W + bS*S,
+        a ~ dnorm(0, 0.2),
+        bW ~ dnorm(0, 0.5),
+        bS ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)), data = d)
+
+precis(cond3) #This is OK
+
+#6H3
+data(foxes)
+foxes$area <- scale(foxes$area)
+foxes$avgfood <- scale(foxes$avgfood)
+foxes$groupsize <- scale(foxes$groupsize)
+foxes$weight <- scale(foxes$weight)
+
+fox_dag <- dagitty("dag{ area -> avgfood -> groupsize -> weight <- avgfood }")
+adjustmentSets(fox_dag, exposure = "area", outcome = "weight") #No need to condition on anything
+
+m6h3 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + bA*area,
+        a ~ dnorm(0, 0.2),
+        bA ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)), data = foxes)
+
+#Prior predictive check
+prior <- extract.prior(m6h3)
+xseq <- seq(-2, 2, length.out = 30)
+mu <- link(m6h3 , post=prior , data=list(area=xseq) )
+plot(foxes$weight ~ foxes$area , type = "n", xlim=c(-2,2) , ylim=c(-3,3) )
+abline(h = c(min(foxes$weight), max(foxes$weight)))
+for ( i in 1:50 ) lines( xseq , mu[i,] , col=col.alpha("black",0.3) )
+
+#Prior looks OK
+
+precis(m6h3) #No effect of area on weight
+
+#6H4
+adjustmentSets(fox_dag, exposure = "avgfood", outcome = "weight") #No need to condition on anything
+
+m6h4 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + bF*avgfood,
+        a ~ dnorm(0, 0.2),
+        bF ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)), data = foxes)
+
+#No effect of adding food. This makes sense when we look at the DAG. Food influences also groupsize, which influences weight. So the TOTAL causal effect is near zero, when we just add more food we increase groupsize which decreases weight
+
+#6H5
+adjustmentSets(fox_dag, exposure = "groupsize", outcome = "weight") #Need to condition on avgfood
+
+m6h5 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + bG*groupsize + bF*avgfood,
+        a ~ dnorm(0, 0.2),
+        bG ~ dnorm(0, 0.5),
+        bF ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)), data = foxes)
+
+precis(m6h5)
+
+#I was ahead of myself and already wrote the explanation above...
+
+#6H6
+#I did not have time to do these exercises...
+
+#6H7
