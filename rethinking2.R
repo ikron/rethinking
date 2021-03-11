@@ -677,3 +677,506 @@ xbar <- mean(d$weight)
 for ( i in 1:N ) curve( a[i] + b1[i]*(x - xbar) + b2[i]*(x-xbar),
 from=min(d$weight) , to=max(d$weight) , add=TRUE ,
 col=col.alpha("black",0.2) )
+### * Chapter 5
+
+#"In large data sets, every pair of variables has a statistically discernible non-zero correlation"
+
+data(WaffleDivorce)
+d <- WaffleDivorce
+d$A <- scale( d$MedianAgeMarriage )
+d$D <- scale( d$Divorce )
+d$M <- scale(d$Marriage) 
+
+library(dagitty)
+dag5.1 <- dagitty( "dag {
+A -> D
+A -> M
+M -> D
+}")
+coordinates(dag5.1) <- list( x=c(A=0,D=1,M=2) , y=c(A=0,D=1,M=0) )
+drawdag( dag5.1 )
+
+DMA_dag2 <- dagitty('dag{ D <- A -> M }')
+impliedConditionalIndependencies( DMA_dag2 )
+
+#"Never use residuals as data!"
+
+#bookmark 5.2
+prior <- extract.prior( m5.5 )
+xseq <- c(-2,2)
+mu <- link( m5.5_draft , post=prior , data=list(N=xseq) )
+plot( NULL , xlim=xseq , ylim=xseq )
+for ( i in 1:50 ) lines( xseq , mu[i,] , col=col.alpha("black",0.3) )
+
+#
+xseq <- seq( from=min(dcc$M)-0.15 , to=max(dcc$M)+0.15 , length.out=30 )
+mu <- link( m5.6 , data=list(M=xseq) )
+mu_mean <- apply(mu,2,mean)
+mu_PI <- apply(mu,2,PI)
+plot( K ~ M , data=dcc )
+lines( xseq , mu_mean , lwd=2 )
+shade( mu_PI , xseq )
+
+m5.7 <- quap(
+alist(
+K ~ dnorm( mu , sigma ) ,
+mu <- a + bN*N + bM*M ,
+a ~ dnorm( 0 , 0.2 ) ,
+bN ~ dnorm( 0 , 0.5 ) ,
+bM ~ dnorm( 0 , 0.5 ) ,
+sigma ~ dexp( 1 )
+) , data=dcc )
+precis(m5.7)
+
+#Counterfactual holding N = 0
+xseq <- seq( from=min(dcc$M)-0.15 , to=max(dcc$M)+0.15 , length.out=30 )
+mu <- link( m5.7 , data=data.frame( M=xseq , N=0 ) )
+mu_mean <- apply(mu,2,mean)
+mu_PI <- apply(mu,2,PI)
+plot( NULL , xlim=range(dcc$M) , ylim=range(dcc$K) )
+lines( xseq , mu_mean , lwd=2 )
+shade( mu_PI , xseq )
+
+#Counterfactual holding M = 0
+xseq <- seq( from=min(dcc$N)-0.15 , to=max(dcc$N)+0.15 , length.out=30 )
+mu <- link( m5.7 , data=data.frame( N=xseq , M=0 ) )
+mu_mean <- apply(mu,2,mean)
+mu_PI <- apply(mu,2,PI)
+plot( NULL , xlim=range(dcc$N) , ylim=range(dcc$K) )
+lines( xseq , mu_mean , lwd=2 )
+shade( mu_PI , xseq )
+
+dag5.7 <- dagitty( "dag{
+M -> K <- N
+M -> N }" )
+coordinates(dag5.7) <- list( x=c(M=0,K=1,N=2) , y=c(M=0.5,K=1,N=0.5) )
+MElist <- equivalentDAGs(dag5.7)
+drawdag(MElist)
+
+### ** Practise
+
+### *** Difficulty level: Easy
+
+#5E1
+#2 and 4
+
+#5E2
+#Let A = animal diversity, P = plant diversity, and L = latitude
+#A ~ (mu, sigma)
+#mu_i = alpha + L_i*Beta_L + P_i*Beta_P
+
+#5E3
+#Let F = amount of funding, S = size of laboratory, T = time to degree
+#T ~ (mu, sigma)
+#mu_i = alpha + F_i*Beta_F + S_i*Beta_S
+#Both Beta_F and Beta_S are positive andF_i and S_i have to be negatively correlated with each other
+
+#5E4
+#Ignoring any effects of priors
+#Models 1, 3, 4, and 5 are inferentially equivalent, model 2 has an extra parameter
+
+### *** Difficulty level: Medium
+
+#5M1
+#Spurious correlation: Association number of people drowned, ice cream sales, and temperature
+#both ice cream sales and temperature are correlated with n. people drowned
+#However, when both temperature and ice cream sales are included in the model only temp. has association
+
+#5M2
+#Masked relationship: Association between health, income and use of medicine. Richer people are more healthy, healthy people use less drugs, and richer people use more drugs (because they can afford them)
+
+#5M3
+#If people remarry after their divorce divorces could result in more marriages
+
+#5M4
+#Mormon data from wikipedia
+data(WaffleDivorce)
+d <- WaffleDivorce
+d$pct_LDS <- c(0.75, 4.53, 6.18, 1, 2.01, 2.82, 0.43, 0.55, 0.38,
+0.75, 0.82, 5.18, 26.35, 0.44, 0.66, 0.87, 1.25, 0.77, 0.64, 0.81,
+0.72, 0.39, 0.44, 0.58, 0.72, 1.14, 4.78, 1.29, 0.61, 0.37, 3.34,
+0.41, 0.82, 1.48, 0.52, 1.2, 3.85, 0.4, 0.37, 0.83, 1.27, 0.75,
+1.21, 67.97, 0.74, 1.13, 3.99, 0.92, 0.44, 11.5 )
+
+m1 <- quap(
+alist(
+Divorce ~ dnorm(mu,sigma),
+mu <- a + bR*Marriage + bA*MedianAgeMarriage + bM*pct_LDS,
+a ~ dnorm(0,100),
+c(bA,bR,bM) ~ dnorm(0,10),
+sigma ~ dunif(0,10)
+),
+data=d )
+precis( m1 )
+
+#5M5
+#Let O be obesity, E the amount of exercise, P the price of gasoline, D amount of driving, R restaurant usage
+
+#Hypothesis 1 (Higher P lead to less D, higher D leads to less E, and Higher E leads to less O)
+#There have to be negative relationships between as above
+
+#Hypothesis 2 (Higher P leads to less D, less D leads to less R, less R leads to less O)
+#There have to be negative relationship between P and D, and positive relationships between D and R; R and O)
+#Should probably control for things like income, education etc.
+
+### *** Difficulty level: Hard
+
+data(foxes)
+
+#5H1
+m5h1 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + b1*area,
+        a ~ dnorm(4, 1),
+        b1 ~ dnorm(0,10),
+        sigma ~ dunif(0, 10)
+        ),
+    data = foxes)
+
+#Prior predictive check
+prior <- extract.prior(m5h1)
+xseq <- c(1,6)
+mu <- link(m5h1 , post=prior , data=list(area=xseq) )
+plot( NULL , xlim=xseq , ylim=c(0,8) )
+for ( i in 1:50 ) lines( xseq , mu[i,] , col=col.alpha("black",0.3) )
+
+precis(m5h1)
+
+#Plot
+area.seq <- seq(from = 0.5, to = 5.5, length.out = 200)
+mu <- link(m5h1, data = data.frame(area=area.seq))
+mu.PI <- apply(mu, 2, PI)
+#plot
+plot(weight ~ area, data = foxes, col=rangi2)
+abline(m5h1)
+shade(mu.PI, area.seq)
+
+##Area has no relationship with weight
+
+m5h1.2 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + b1*groupsize,
+        a ~ dnorm(4, 1),
+        b1 ~ dnorm(0, 10),
+        sigma ~ dunif(0,10) ),
+    data = foxes)
+
+#Prior predictive check
+prior <- extract.prior(m5h1.2)
+xseq <- c(1,10)
+mu <- link(m5h1.2, post=prior , data=list(groupsize=xseq) )
+plot( NULL , xlim=xseq , ylim=c(0,8) )
+for ( i in 1:50 ) lines( xseq , mu[i,] , col=col.alpha("black",0.3) )
+
+precis(m5h1.2)
+
+#Plot
+groupsize.seq <- seq(from = 1, to = 9, length.out = 200)
+mu <- link(m5h1.2, data = data.frame(groupsize=groupsize.seq))
+mu.PI <- apply(mu, 2, PI)
+#plot
+plot(weight ~ groupsize, data = foxes, col = rangi2)
+abline(m5h1.2)
+shade(mu.PI, groupsize.seq)
+
+##Group size has only a small effect
+
+#5H2
+m5h2 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + b1*area + b2*groupsize,
+        a ~ dnorm(4, 1),
+        b1 ~ dnorm(0, 10),
+        b2 ~ dnorm(0, 10),
+        sigma ~ dunif(0, 10) ),
+    data = foxes)
+
+#Prior predictive check
+prior <- extract.prior(m5h2)
+xseq <- c(1,10)
+mu <- link(m5h2, post=prior , data=list(groupsize=xseq, area = c(1,6)) )
+plot( NULL , xlim=xseq , ylim=c(0,8) )
+for ( i in 1:50 ) lines( xseq , mu[i,] , col=col.alpha("black",0.3) )
+
+precis(m5h2)
+
+#Now area has a positive effect on weight and groupsize larger negative effect on weight
+
+#Plotting the effects of both variables, while holding the other constant (at mean)
+
+#Effect of area (groupsize held constant) (Counterfactual plot)
+mean.groupsize <- mean(foxes$groupsize)
+area.seq <- seq(from = 0.5, to = 5.5, length.out = 200)
+pred.data <- data.frame(area = area.seq, groupsize = mean.groupsize)
+mu <- link(m5h2, data = pred.data, n = 1e4)
+mu.mean <- apply(mu, 2, mean)
+mu.PI <- apply(mu, 2, PI)
+plot(weight ~ area, data = foxes, type = "n")
+lines(area.seq, mu.mean)
+shade(mu.PI, area.seq)
+
+#Effect of groupsize (area held constant) (Counterfactual plot)
+mean.area <- mean(foxes$area)
+groupsize.seq <- seq(from = 1, to = 9, length.out = 200)
+pred.data <- data.frame(area = mean.area, groupsize = groupsize.seq)
+mu <- link(m5h2, data = pred.data, n = 1e4)
+mu.mean <- apply(mu, 2, mean)
+mu.PI <- apply(mu, 2, PI)
+plot(weight ~ groupsize, data = foxes, type = "n")
+lines(groupsize.seq, mu.mean)
+shade(mu.PI, groupsize.seq)
+
+#We observe different results because area and groupsize are correlated
+plot(groupsize ~ area, data=foxes)
+#But since correlation is not perfect, in multiple regression we can distangle that in those areas with less foxes for are size the foxes tend to be heavier
+
+#5H3
+m5h3.1 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + b1*avgfood + b2*groupsize,
+        a ~ dnorm(4, 1),
+        b1 ~ dnorm(0, 10),
+        b2 ~ dnorm(0, 10),
+        sigma ~ dunif(0, 10) ),
+    data = foxes)
+
+#Prior predictive check
+prior <- extract.prior(m5h3.1)
+xseq <- c(1,10)
+mu <- link(m5h3.1, post=prior , data=list(groupsize=xseq, avgfood = c(0,2)) )
+plot( NULL , xlim=xseq , ylim=c(0,8) )
+for ( i in 1:50 ) lines( xseq , mu[i,] , col=col.alpha("black",0.3) )
+
+precis(m5h3.1)
+
+m5h3.2 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + b1*avgfood + b2*area + b3*groupsize,
+        a ~ dnorm(4, 1),
+        b1 ~ dnorm(0, 10),
+        b2 ~ dnorm(0, 10),
+        b3 ~ dnorm(0, 10),
+        sigma ~ dunif(0, 10) ),
+    data = foxes)
+
+precis(m5h3.2)
+
+#When area is included in the model standard deviation of avgfood increases
+plot(coeftab(m5h3.1, m5h3.2), pars = c("b1", "b2", "b3"))
+
+pairs( ~ weight + avgfood + area + groupsize, data=foxes , col=rangi2 )
+#average food and are also correlated with each other. Which is the better predictor? Could do some model comparison (introduced in a later chapter), or experiment. Biological reasoning suggests that avgfood is probably more important?
+
+
+######################################################3
+#Extra assignments that were not in our PDF version ## 
+######################################################
+
+#5H1
+#In the divorce example, suppose the DAG is: M→A→D. What are the implied conditional independencies of the graph? Are the data consistent with it?
+library(dagitty)
+
+divorce_dag <- dagitty("dag{ M -> A -> D}")
+impliedConditionalIndependencies(divorce_dag)
+
+#   D _||_ M | A
+#Divorce rate should be independent of marriage rate conditioning on age of marriage
+data(WaffleDivorce)
+d <- list()
+d$A <- standardize( WaffleDivorce$MedianAgeMarriage )
+d$D <- standardize( WaffleDivorce$Divorce )
+d$M <- standardize( WaffleDivorce$Marriage )
+
+mMA <- quap(
+alist(
+D ~ dnorm( mu , sigma ) ,
+mu <- a + bM*M + bA*A ,
+a ~ dnorm( 0 , 0.2 ) ,
+bM ~ dnorm( 0 , 0.5 ) ,
+bA ~ dnorm( 0 , 0.5 ) ,
+sigma ~ dexp( 1 )),
+data = d )
+
+##The data are consistent with this implied conditional independency
+
+
+#5H2
+m5.3_A <- quap(
+alist(
+## M -> A -> D
+D ~ dnorm( mu , sigma ) ,
+mu <- a + bM*M + bA*A ,
+a ~ dnorm( 0 , 0.2 ) ,
+bM ~ dnorm( 0 , 0.5 ) ,
+bA ~ dnorm( 0 , 0.5 ) ,
+sigma ~ dexp( 1 ),
+## M -> A
+A ~ dnorm( mu_M , sigma_M ),
+mu_M <- aM + bAM*M,
+aM ~ dnorm( 0 , 0.2 ),
+bAM ~ dnorm( 0 , 0.5 ),
+sigma_M ~ dexp( 1 )
+) , data = d )
+
+
+M_seq <- seq( from=-2 , to=2 , length.out=30 )
+sim_dat <- data.frame( M=M_seq )
+# simulate A and then D, using M_seq
+s <- sim( m5.3_A , data=sim_dat , vars=c("A","D") )
+
+# display counterfactual predictions
+plot( sim_dat$M , colMeans(s$D) , ylim=c(-2,2) , type="l" ,
+xlab="manipulated M" , ylab="counterfactual D" )
+shade( apply(s$D,2,PI) , sim_dat$M )
+mtext( "Total counterfactual effect of M on D" )
+
+#5H3
+data(milk)
+d <- milk
+d$K <- scale( d$kcal.per.g )
+d$N <- scale( d$neocortex.perc )
+d$M <- scale( log(d$mass))
+dcc <- d[ complete.cases(d$K,d$N,d$M) , ]
+
+m5h3 <- quap(
+    alist(
+        ##K <- M -> N
+        K ~ dnorm(mu, sigma),
+        mu <- a + bM*M + bN*N,
+        a ~ dnorm(0, 0.2),
+        bM ~ dnorm(0, 0.5),
+        bN ~ dnorm(0, 0.5),
+        sigma ~ dexp(1),
+        ##M -> N
+        N ~ dnorm(mu_N, sigma_N),
+        mu_N <- a_N + bM_N*M,
+        a_N ~ dnorm(0, 0.2),
+        bM_N ~ dnorm(0, 0.5),
+        sigma_N ~ dexp(1)
+        ), data = dcc )
+
+M_seq <- seq(from = -2, to = 2, length.out = 30)
+sim_dat <- data.frame(M=M_seq)
+#simulate N and then K using M_seq
+s <- sim(m5h3, data = sim_dat, vars = c("N", "K"))
+
+# display counterfactual predictions
+plot( sim_dat$M , colMeans(s$K) , ylim=c(-2,2) , type="l" ,
+xlab="manipulated M" , ylab="counterfactual K" )
+shade( apply(s$K,2,PI) , sim_dat$M )
+mtext( "Total counterfactual effect of M on K" )
+
+#Note that since mass is on log scale, manipulating the counterfactual effect would be non-linear if mass were on normal scale
+
+#5H4
+#In our model southerness influences M and A, which influence D, A influences also M
+divorce_dag <- dagitty("dag{
+A -> M -> D
+A -> M
+A <- S -> M
+A -> D
+}")
+drawdag( divorce_dag )
+impliedConditionalIndependencies(divorce_dag)
+#D _||_ S | A, M
+#Divorce rate should be independent of southernness when we condition on age of marriage and marriage rate
+
+data(WaffleDivorce)
+d <- list()
+d$A <- standardize( WaffleDivorce$MedianAgeMarriage )
+d$D <- standardize( WaffleDivorce$Divorce )
+d$M <- standardize( WaffleDivorce$Marriage )
+d$S <- WaffleDivorce$South + 1 #Southern states are index 2
+
+m5h4 <- quap(
+    alist(
+        D ~ dnorm(mu, sigma),
+        mu <- a[S] + bA*A + bM*M,
+        a[S] ~ dnorm(0, 0.2),
+        bA ~ dnorm(0, 0.5),
+        bM ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)), data = d)
+
+post <- extract.samples(m5h4)
+post$diff_south <- post$a[,2] - post$a[,1]
+precis(post , depth=2 )
+#Inspecting the posterior sample of difference between non-Southern and Southern states. The 89% interval overlaps with zero, suggesting that divorce rate is mostly independent when conditioning on age and marriage rate. However, thu bulk of the difference is positive, which could give a hint that there are some unobservable variables associated with the South that still influence divorce rate.
+
+precis(m5h4, depth = 2)
+
+
+
+### * Chapter 6
+
+# "Regression will no sort it out"
+# "... and model selection does not help"
+# "because causal inference and making out-of-sample predictions are not the same thing!"
+
+
+m6.1 <- quap(
+alist(
+height ~ dnorm( mu , sigma ) ,
+mu <- a + bl*leg_left + br*leg_right ,
+a ~ dnorm( 10 , 100 ) ,
+bl ~ dnorm( 2 , 10 ) ,
+br ~ dnorm( 2 , 10 ) ,
+sigma ~ dexp( 1 )
+) ,
+data=d )
+precis(m6.1)
+
+
+data(milk)
+d <- milk
+d$K <- scale( d$kcal.per.g )
+d$F <- scale( d$perc.fat )
+d$L <- scale( d$perc.lactose )
+
+set.seed(71)
+# number of plants
+N <- 100
+# simulate initial heights
+h0 <- rnorm(N,10,2)
+# assign treatments and simulate fungus and growth
+treatment <- rep( 0:1 , each=N/2 )
+fungus <- rbinom( N , size=1 , prob=0.5 - treatment*0.4 )
+h1 <- h0 + rnorm(N, 5 - 3*fungus)
+# compose a clean data frame
+d <- data.frame( h0=h0 , h1=h1 , treatment=treatment , fungus=fungus )
+precis(d)
+
+library(dagitty)
+plant_dag <- dagitty( "dag {
+H_0 -> H_1
+F -> H_1
+T -> F
+}")
+coordinates( plant_dag ) <- list( x=c(H_0=0,T=2,F=1.5,H_1=1) ,
+y=c(H_0=0,T=0,F=0,H_1=0) )
+drawdag( plant_dag )
+
+#bookmark 6.4
+
+dag_6.1 <- dagitty( "dag {
+U [unobserved]
+X -> Y
+X <- U <- A -> C -> Y
+U -> B <- C
+}")
+adjustmentSets( dag_6.1 , exposure="X" , outcome="Y" ) #Tells us which variables to conditin for
+
+
+dag_6.2 <- dagitty( "dag {
+A -> D
+A -> M -> D
+A <- S -> M
+S -> W -> D
+}")
+adjustmentSets( dag_6.2 , exposure="W" , outcome="D" )
+
+impliedConditionalIndependencies( dag_6.2 )
