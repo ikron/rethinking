@@ -1407,3 +1407,319 @@ precis(m6h5)
 #I did not have time to do these exercises...
 
 #6H7
+
+### * Chapter 7
+
+#Some notes
+##"When we design any particular statistical model, we must decide whether we want to understand causes or rather just predict"
+##"Information: The reduction in uncertainty when we learn the outcome"
+##"... we have to use the entire posterior distribution. Otherwise, vengeful angels will descend upon you."
+
+#bookmark 7.3
+
+#"Cross-validation and WAIC aim to find models that make good predictions. They don't solve any causal inference problem."
+
+#bookmark 7.7 Practise
+
+### ** Practice problems
+
+### *** Difficulty level: Easy
+
+#7E1.
+#Information is defined as: "The reduction in uncertainty when we learn an outcome
+#1. Measure of uncertainty must be continuous. This is to prevent large changes in uncertainty measure resulting from relatively small changes in probabilities (think p-values)
+#2. Measure of uncertainty should increases as the numbers of events increases
+#3. The measure of uncertainty should be additive.
+
+#7E2.
+#Entropy is the average log-probability of an event
+#H(p) = -sum_{i=1}^n p_i\log(p_i)
+
+##Function to calculate information entropy
+infentropy <- function(p) {
+#
+#Need to deal with cases when p_i = 0
+p_logp <- function(p) {
+    if(p == 0) return(0) else return(p*log(p))
+    }
+#
+H <- -1*sum(sapply(p, p_logp))
+return(H)
+}
+
+#coin with 0.3 tails and 0.7 heads
+infentropy(c(0.3, 0.7)) #H = 0.61
+
+#7E3.
+infentropy(c(0.2, 0.25, 0.25, 0.3)) #H = 1.38
+
+#7E4.
+infentropy(c( 1/3, 1/3, 1/3, 0)) #H = 1.10
+
+### *** Difficulty level: Medium
+
+#7M1.
+#AIC = -2lppd + 2p, where lppd = log-pointwise-predictive-density and p = number of free parameters
+#WAIC = -2(lppd - sum(var_theta log p(y_i|theta) )
+#WAIC is same formula as AIC, with the exception of the last term. WAIC uses 2 times the sum of log-probability variances from each observation instead of 2 times the number of free parameters
+
+#AIC assumes that priors are flat or overwhelmed by likelihood, the posterior distribution is approximately multivariate Gaussian, and the sample size is much greater than the number of parameters. If these hold AIC approx WAIC.
+
+#7M2.
+#Model selection refers to just picking the best (lowest criterion value) model and discarding the other models. Information is lost about the relative model accuracy. This information can inform how confident we are in the models. Model selection cares only about predictive accuracy and ignores causal inference. Thus, a model that has confounds may be selected to be the "best".
+
+#Model comparison uses multiple models to understand how the variables included influence prediction and affect the implied conditional independencies in a causal model.
+
+#7M3.
+#Models must be fit to the same observations because of the way lppd is calculated
+#lppd(y, theta) = sum_i log (1/S) sum_s p(y_i|theta_s), where S = number of samples. Larger sample size will necessarely lead to smaller lppd, which will increase the information criteria
+
+#7M4.
+#when prior becomes more concentrated the penalty term in the WAIC formula sum(var_theta log p(y_i|theta) is the sum of variances. Thus, if we restrict the prior to have a smaller variance we get smaller variances for the log-probabilities and a smaller penalty term.
+
+#7M5.
+#Informative priors restrict the plausible values for parameters. By using informative priors we limit the model from learning too much from the data.
+
+#7M6.
+#If prior is too restrictive the model does not learn enough from data, and the model just returns our prior distributions.
+
+### *** Difficulty level: Hard
+
+#7H1.
+data(Laffer)
+
+d <- Laffer
+d$rate <- scale(Laffer$tax_rate)
+d$rev <- scale(Laffer$tax_revenue)
+
+#Linear
+m7h1.1 <- quap(
+    alist(
+        rev ~ dnorm(mu, sigma),
+        mu <- a + bR*rate,
+        a ~ dnorm(0,0.2),
+        bR ~ dnorm(0,0.5),
+        sigma ~ dexp(1)), data = d)
+
+precis(m7h1.1)
+
+xseq <- seq( from = min(d$rate)-0.15, to = max(d$rate)+0.15, length.out = 30)
+mu <- link(m7h1.1, data = list(rate=xseq))
+mu_mean <- apply(mu,2,mean)
+mu_PI <- apply(mu,2,PI)
+plot(rev ~ rate, data = d)
+lines(xseq, mu_mean, lwd = 2)
+shade(mu_PI, xseq)
+
+#Quadratic
+m7h1.2 <- quap(
+    alist(
+        rev ~ dnorm(mu, sigma),
+        mu <- a + bR[1]*rate + bR[2]*rate^2,
+        a ~ dnorm(0,0.2),
+        bR ~ dnorm(0,0.5),
+        sigma ~ dexp(1)), data = d, start = list(bR=rep(0,2)))
+
+precis(m7h1.2, depth = 2)
+
+xseq <- seq( from = min(d$rate)-0.15, to = max(d$rate)+0.15, length.out = 30)
+mu <- link(m7h1.2, data = list(rate=xseq))
+mu_mean <- apply(mu,2,mean)
+mu_PI <- apply(mu,2,PI)
+plot(rev ~ rate, data = d)
+lines(xseq, mu_mean, lwd = 2)
+shade(mu_PI, xseq)
+
+#There could be slight curvature
+
+#Comparing the models
+compare(m7h1.1, m7h1.2) #But we don't have any evidence to prefer one over the other, dWAIC = 0.3, while dSE = 2.97
+
+#7H2.
+compare(m7h1.1, m7h1.2, func = PSIS)
+
+
+psis_m7h1.1 <- PSIS(m7h1.1, pointwise = TRUE)
+waic_m7h1.1 <- WAIC(m7h1.1, pointwise = TRUE)
+
+waic_m7h1.2 <- WAIC(m7h1.2, pointwise = TRUE)
+psis_m7h1.2 <- PSIS(m7h1.2, pointwise = TRUE)
+
+plot(psis_m7h1.1$k , waic_m7h1.1$penalty , xlab="PSIS Pareto k" ,
+ylab="WAIC penalty" , col=rangi2 , lwd=2 ) #Observation 12 is an outlier
+
+plot(psis_m7h1.2$k , waic_m7h1.2$penalty , xlab="PSIS Pareto k" ,
+ylab="WAIC penalty" , col=rangi2 , lwd=2 ) #Observation 12 is an outlier
+
+#Using robust regression
+m7h1.1t <- quap(
+    alist(
+        rev ~ dstudent(2, mu, sigma),
+        mu <- a + bR*rate,
+        a ~ dnorm(0,0.2),
+        bR ~ dnorm(0,0.5),
+        sigma ~ dexp(1)), data = d)
+
+precis(m7h1.1t)
+
+xseq <- seq( from = min(d$rate)-0.15, to = max(d$rate)+0.15, length.out = 30)
+mu <- link(m7h1.1t, data = list(rate=xseq))
+mu_mean <- apply(mu,2,mean)
+mu_PI <- apply(mu,2,PI)
+plot(rev ~ rate, data = d)
+lines(xseq, mu_mean, lwd = 2)
+shade(mu_PI, xseq)
+
+#Robust quadratic
+m7h1.2t <- quap(
+    alist(
+        rev ~ dstudent(2, mu, sigma),
+        mu <- a + bR[1]*rate + bR[2]*rate^2,
+        a ~ dnorm(0,0.2),
+        bR ~ dnorm(0,0.5),
+        sigma ~ dexp(1)), data = d, start = list(bR=rep(0,2)))
+
+precis(m7h1.2t, depth = 2)
+
+xseq <- seq( from = min(d$rate)-0.15, to = max(d$rate)+0.15, length.out = 30)
+mu <- link(m7h1.2t, data = list(rate=xseq))
+mu_mean <- apply(mu,2,mean)
+mu_PI <- apply(mu,2,PI)
+plot(rev ~ rate, data = d)
+lines(xseq, mu_mean, lwd = 2)
+shade(mu_PI, xseq)
+
+#Model comparison
+compare(m7h1.1t, m7h1.2t, func = PSIS)
+compare(m7h1.1t, m7h1.2t) #quadratic has now slightly more evidence, but not very strong
+#In order to distinguish between linear and quadratic we would need more data with higher tax rates
+
+#7H3.
+#Using my function earlier to calculate entropy
+
+#Entering the data
+birds <- data.frame( island = paste("Island", 1:3), A = c(0.2, 0.8, 0.05), B = c(0.2, 0.1, 0.15), C = c(0.2, 0.05, 0.7), D = c(0.2, 0.025, 0.05), E = c(0.2, 0.025, 0.05))
+
+apply(birds[,-1], 1, infentropy)
+     #Island 1    #Island 2   #Island 3
+#H    1.61         0.74         0.98
+#Island 1 has the highest entropy (bird distribution is uniform -> max entropy)
+
+#Function to calculate K-L divergence
+D_kl <- function(p, q) {
+    sum(p*(log(p)-log(q)))
+    }
+
+#Initialize results mat
+results.mat <- matrix(rep(0, 3*3), ncol = 3)
+for(i in 1:3) {
+    for(j in 1:3) {
+        results.mat[i,j] <- D_kl(birds[i,-1], birds[j,-1])
+    }
+}
+
+#View the distances
+results.mat
+
+#The distances are the shortest when we use island 1. We are least surprised when we start with an uniform distribution. In contrast island 2 has the highest distances to the other islands.
+
+#7H4.
+#Previous model from page 181
+d <- sim_happiness( seed=1977 , N_years=1000 )
+d2 <- d[ d$age>17 , ] # only adults
+d2$A <- ( d2$age - 18 ) / ( 65 - 18 )
+d2$mid <- d2$married + 1
+
+m6.9 <- quap(
+alist(
+happiness ~ dnorm( mu , sigma ),
+mu <- a[mid] + bA*A,
+a[mid] ~ dnorm( 0 , 1 ),
+bA ~ dnorm( 0 , 2 ),
+sigma ~ dexp(1)
+) , data=d2 )
+precis(m6.9,depth=2)
+
+m6.10 <- quap(
+alist(
+happiness ~ dnorm( mu , sigma ),
+mu <- a + bA*A,
+a ~ dnorm( 0 , 1 ),
+bA ~ dnorm( 0 , 2 ),
+sigma ~ dexp(1)
+) , data=d2 )
+precis(m6.10)
+
+compare(m6.9, m6.10) #Model m6.9 is overwhelmingly preferred, it gets all the weight
+#However, the correct causal inference is made when using m6.10, because marital status is a collider. Predictions are improved when marital status is included but the association is not causal.
+
+#7H5.
+data(foxes)
+
+foxes$area <- scale(foxes$area)
+foxes$avgfood <- scale(foxes$avgfood)
+foxes$groupsize <- scale(foxes$groupsize)
+foxes$weight <- scale(foxes$weight)
+
+#avgfood + groupsize + area
+model1 <-  quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + bF*avgfood + bG*groupsize + bA*area,
+        a ~ dnorm(0, 0.2),
+        bF ~ dnorm(0, 0.5),
+        bG ~ dnorm(0, 0.5),
+        bA ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)), data = foxes)
+
+#avgfood + groupsize
+model2 <-  quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + bF*avgfood + bG*groupsize,
+        a ~ dnorm(0, 0.2),
+        bF ~ dnorm(0, 0.5),
+        bG ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)), data = foxes)
+
+#groupsize + area
+model3 <-  quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a +  bG*groupsize + bA*area,
+        a ~ dnorm(0, 0.2),
+        bG ~ dnorm(0, 0.5),
+        bA ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)), data = foxes)
+
+#avgfood
+model4 <-  quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + bF*avgfood,
+        a ~ dnorm(0, 0.2),
+        bF ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)), data = foxes)
+
+#area
+model5 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + bA*area,
+        a ~ dnorm(0, 0.2),
+        bA ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)), data = foxes)
+
+#comparing the different models
+compare(model1, model2, model3, model4, model5) #Models 1,2,3 have about the same evidence, models 4 and 5 are a little worse but still within 2 SE.
+plot(compare(model1, model2, model3, model4, model5))
+
+#Consider the DAG we were given about the foxes
+library(dagitty)
+fox_dag <- dagitty("dag{ area -> avgfood -> groupsize -> weight <- avgfood }")
+drawdag(fox_dag)
+
+#Models 1 to 3 are nearly identical, since they contain groupsize and one both avgfood or area. From the DAG, the effect of area goes through avgfood so including one or the other in the model is enough
+
+#Models 4 and 5 are nearly identical because adjusting for area or avgfood should be the same, these models are missing groupsize
+
