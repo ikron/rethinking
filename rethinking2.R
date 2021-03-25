@@ -1723,3 +1723,369 @@ drawdag(fox_dag)
 
 #Models 4 and 5 are nearly identical because adjusting for area or avgfood should be the same, these models are missing groupsize
 
+### * Chapter 8
+
+#bookmark 8.1
+
+data(rugged)
+d <- rugged
+# make log version of outcome
+d$log_gdp <- log( d$rgdppc_2000 )
+# extract countries with GDP data
+dd <- d[ complete.cases(d$rgdppc_2000) , ]
+# rescale variables
+dd$log_gdp_std <- dd$log_gdp / mean(dd$log_gdp)
+dd$rugged_std <- dd$rugged / max(dd$rugged)
+
+m8.1 <- quap(
+alist(
+log_gdp_std ~ dnorm( mu , sigma ) ,
+mu <- a + b*( rugged_std - 0.215 ) ,
+a ~ dnorm( 1 , 0.1 ) ,
+b ~ dnorm( 0 , 0.3 ) ,
+sigma ~ dexp(1)
+) , data=dd )
+
+precis(m8.1)
+
+# make variable to index Africa (1) or not (2)
+dd$cid <- ifelse( dd$cont_africa==1 , 1 , 2 )
+
+m8.2 <- quap(
+alist(
+log_gdp_std ~ dnorm( mu , sigma ) ,
+mu <- a[cid] + b*( rugged_std - 0.215 ) ,
+a[cid] ~ dnorm( 1 , 0.1 ) ,
+b ~ dnorm( 0 , 0.3 ) ,
+sigma ~ dexp( 1 )
+) , data=dd, start = list(a = c(1,1), b = 0 ))
+
+compare( m8.1 , m8.2 )
+
+precis( m8.2 , depth=2 )
+
+post <- extract.samples(m8.2)
+diff_a1_a2 <- post$a[,1] - post$a[,2]
+PI( diff_a1_a2 )
+
+m8.3 <- quap(
+alist(
+log_gdp_std ~ dnorm( mu, sigma),
+mu <- a[cid] + b[cid]*(rugged_std - 0.215),
+a[cid] ~ dnorm( 1 , 0.1),
+b[cid] ~ dnorm( 0 , 0.3),
+sigma ~ dexp( 1 )
+) , data=dd )
+
+compare( m8.1 , m8.2 , m8.3 , func=PSIS )
+
+plot( PSIS( m8.3 , pointwise=TRUE )$k )
+
+data(tulips)
+d <- tulips
+str(d)
+
+d$blooms_std <- d$blooms / max(d$blooms)
+d$water_cent <- d$water - mean(d$water)
+d$shade_cent <- d$shade - mean(d$shade)
+
+m8.5 <- quap(
+alist(
+blooms_std ~ dnorm( mu , sigma ) ,
+mu <- a + bw*water_cent + bs*shade_cent + bws*water_cent*shade_cent ,
+a ~ dnorm( 0.5 , 0.25 ) ,
+bw ~ dnorm( 0 , 0.25 ) ,
+bs ~ dnorm( 0 , 0.25 ) ,
+bws ~ dnorm( 0 , 0.25 ) ,
+sigma ~ dexp( 1 )
+) , data=d )
+
+##bookmark 8.5
+
+### ** Practice
+
+### *** Difficulty level: Easy
+
+#8E1
+#1) temperature
+#2) field of study
+#3) presence or absence of wheels
+
+#8E2
+#Interactions are invoked in statements: 1, (3)
+
+#8E3
+# C = a + Bh*heat + Bl*liquid + Bhl*heat*liquid, where C = degree of caramelization
+# S = a[fi] + Bc*cylinders, where S = speed, fi denotes index for different fuel injectors
+# P = a*parents + B*friends, where P = political belief, a = beliefs of parents, B = beliefs of friends, friends = indicators whether person has friends (could also be an interaction)
+# I = a + B1*sociality + B2*appendages
+
+### *** Difficulty level: Medium 
+
+#8M1
+
+#This means a three way interaction between water, shade, and temperature
+
+#8M2
+
+#mu = (a + Bw*W + Bs*S + Bws*W*S)*T, where is an indicator variable T = {0, 1}
+
+#8M3
+#For example raven population size could depend on deer population size and presence or absence of wolves.
+
+### *** Difficulty level: Hard
+#8H1
+data(tulips)
+d <- tulips
+str(d)
+
+#Centering water and shade variables and making an index variable of bed
+d$blooms_std <- d$blooms / max(d$blooms)
+d$shade.c <- d$shade - mean(d$shade)
+d$water.c <- d$water - mean(d$water)
+d$bed.ind <- coerce_index(d$bed)
+
+#Modelling effect of bed (block) as a unique intercept for the different flower beds
+
+#Start values for parameters added
+#Model with bed
+m1 <- quap(
+alist(
+blooms_std~ dnorm(mu , sigma),
+mu <- a[bed.ind] + bW*water.c + bS*shade.c + bWS*water.c*shade.c,
+a ~ dnorm(0, 0.25),
+bW ~ dnorm(0, 0.25),
+bS ~ dnorm(0, 0.25),
+bWS ~ dnorm(0, 0.25),    
+sigma ~ dexp(1)
+),
+data=d,
+start=list(a= rep(0,3),bW=0,bS=0, bWS=0))
+
+precis(m1, depth = 2)
+
+post <- extract.samples(m1)
+diff_a1_a2 <- post$a[,1] - post$a[,2]
+PI(diff_a1_a2) #bed level 1 is different from the other two
+
+
+
+#8H2
+#Model without flowerbed
+m2 <- quap(
+alist(
+blooms_std~ dnorm(mu , sigma),
+mu <- a + bW*water.c + bS*shade.c + bWS*water.c*shade.c,
+a ~ dnorm(0, 0.25),
+bW ~ dnorm(0, 0.25),
+bS ~ dnorm(0, 0.25),
+bWS ~ dnorm(0, 0.25),    
+sigma ~ dexp(1)
+),
+data=d,
+start=list(a= 0,bW=0,bS=0, bWS=0))
+
+precis(m2, depth = 2)
+
+compare(m1, m2) #Model with bed included receives 68% of the weight, but difference to m2 is very small (less than 1 standard error)
+plot(coeftab(m1, m2))
+
+#Probably drop one of the bed levels?
+
+#8H3
+data(rugged)
+d <- rugged
+# make log version of outcome
+d$log_gdp <- log( d$rgdppc_2000 )
+# extract countries with GDP data
+dd <- d[ complete.cases(d$rgdppc_2000) , ]
+# rescale variables
+dd$log_gdp_std <- dd$log_gdp / mean(dd$log_gdp)
+dd$rugged_std <- dd$rugged / max(dd$rugged)
+# make variable to index Africa (1) or not (2)
+dd$cid <- ifelse( dd$cont_africa==1 , 1 , 2 )
+
+m8.3 <- quap(
+alist(
+log_gdp_std ~ dnorm(mu, sigma),
+mu <- a[cid] + b[cid]*(rugged_std - 0.215),
+a[cid] ~ dnorm(1, 0.1),
+b[cid] ~ dnorm(0, 0.3),
+sigma ~ dexp(1)
+) , data=dd )
+
+precis(m8.3, depth = 2)
+
+# plot Africa - cid=1
+rugged_seq <- seq( from=-0.1 , to=1.1 , length.out=30 )
+d.A1 <- dd[ dd$cid==1 , ]
+plot( d.A1$rugged_std , d.A1$log_gdp_std , pch=16 , col=rangi2 ,
+xlab="ruggedness (standardized)" , ylab="log GDP (as proportion of mean)" ,
+xlim=c(0,1) )
+
+mu <- link( m8.3 , data=data.frame( cid=1 , rugged_std=rugged_seq ) )
+mu_mean <- apply( mu , 2 , mean )
+mu_ci <- apply( mu , 2 , PI , prob=0.97 )
+lines( rugged_seq , mu_mean , lwd=2 )
+shade( mu_ci , rugged_seq , col=col.alpha(rangi2,0.3) )
+mtext("African nations")
+
+# plot non-Africa - cid=2
+d.A0 <- dd[ dd$cid==2 , ]
+plot( d.A0$rugged_std , d.A0$log_gdp_std , pch=1 , col="black" ,
+xlab="ruggedness (standardized)" , ylab="log GDP (as proportion of mean)" ,
+xlim=c(0,1) )
+mu <- link( m8.3 , data=data.frame( cid=2 , rugged_std=rugged_seq ) )
+mu_mean <- apply( mu , 2 , mean )
+mu_ci <- apply( mu , 2 , PI , prob=0.97 )
+lines( rugged_seq , mu_mean , lwd=2 )
+shade( mu_ci , rugged_seq )
+mtext("Non-African nations")
+
+waic_m8.3 <- WAIC(m8.3, pointwise = TRUE)
+psis_m8.3 <- PSIS(m8.3, pointwise = TRUE)
+plot(psis_m8.3$k, waic_m8.3$penalty, xlab="PSIS Pareto k", ylab="WAIC penalty", col=rangi2, lwd=2)
+abline(v = 0.5, lty = "dashed")
+
+dd[which(psis_m8.3$k > 0.5),"country"] #Lesotho is an outlier, high ruggedness, quite small GDP
+dd[which(waic_m8.3$penalty == max(waic_m8.3$penalty)),"country"] #Seuchelles has high WAIC penalty
+
+##Model with robust regression
+m8.3r <- quap(
+alist(
+log_gdp_std ~ dstudent(2, mu, sigma),
+mu <- a[cid] + b[cid]*(rugged_std - 0.215),
+a[cid] ~ dnorm(1, 0.1),
+b[cid] ~ dnorm(0, 0.3),
+sigma ~ dexp(1)
+) , data=dd )
+
+precis(m8.3, depth = 2)
+
+plot(coeftab(m8.3, m8.3r)) #Conclusions do not really change when using robust regression
+
+waic_m8.3r <- WAIC(m8.3r, pointwise = TRUE)
+psis_m8.3r <- PSIS(m8.3r, pointwise = TRUE)
+plot(psis_m8.3r$k, waic_m8.3r$penalty, xlab="PSIS Pareto k", ylab="WAIC penalty", col=rangi2, lwd=2)
+abline(v = 0.5, lty = "dashed") #Much better 
+
+#8H4
+data(nettle)
+d <- nettle
+d$lang.per.cap <- d$num.lang / d$k.pop
+d$log_langpc <- scale(log(d$lang.per.cap))
+d$scaled.growseason <- scale(d$mean.growing.season)
+d$scaled.sd.growseason <- scale(d$sd.growing.season)
+d$scaled.log.area <- scale(log(d$area))
+
+#A)
+m1 <- quap(
+    alist(
+        log_langpc ~ dnorm(mu, sigma),
+        mu <- a + B*scaled.growseason + Ba*scaled.log.area,
+        a ~ dnorm(0, 0.2),
+        B ~ dnorm(0, 0.5),
+        Ba ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)),
+    data = d)
+
+precis(m1) #Language diversity is positively associated with growing season
+
+m1.2 <- quap(
+    alist(
+        log_langpc ~ dnorm(mu, sigma),
+        mu <- a + B*scaled.growseason,
+        a ~ dnorm(0, 0.2),
+        B ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)),
+    data = d)
+
+compare(m1, m1.2)
+plot(coeftab(m1, m1.2))
+
+
+#B)
+m2 <- quap(
+    alist(
+        log_langpc ~ dnorm(mu, sigma),
+        mu <- a + B*scaled.sd.growseason + Ba*scaled.log.area,
+        a ~ dnorm(0, 0.2),
+        B ~ dnorm(0, 0.5),
+        Ba ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)),
+    data = d)
+
+m2.2 <- quap(
+    alist(
+        log_langpc ~ dnorm(mu, sigma),
+        mu <- a + B*scaled.sd.growseason,
+        a ~ dnorm(0, 0.2),
+        B ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)),
+    data = d)
+
+precis(m2) #SD of growing season is negatively associated with language diversity, but estimate of B does overlap with 0
+
+compare(m2, m2.2)
+plot(coeftab(m2, m2.2))
+
+#C) Mean and SD of growing season interact to reduce language diversity (if mean longer then high SD should reduce lang. div. more)
+m3 <- quap(
+    alist(
+        log_langpc ~ dnorm(mu, sigma),
+        mu <- a + Bm*scaled.growseason + Bs*scaled.sd.growseason + Bms*scaled.growseason*scaled.sd.growseason +  Ba*scaled.log.area,
+        a ~ dnorm(0, 0.2),
+        Bm ~ dnorm(0, 0.5),
+        Bs ~ dnorm(0, 0.5),
+        Bms ~ dnorm(0, 0.5),
+        Ba ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)),
+    data = d)
+
+precis(m3) #Interaction is negative, the effect of area disappears in this model
+
+m3.1 <- quap(
+    alist(
+        log_langpc ~ dnorm(mu, sigma),
+        mu <- a + Bm*scaled.growseason + Bs*scaled.sd.growseason + Bms*scaled.growseason*scaled.sd.growseason,
+        a ~ dnorm(0, 0.2),
+        Bm ~ dnorm(0, 0.5),
+        Bs ~ dnorm(0, 0.5),
+        Bms ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)),
+    data = d)
+
+compare(m3, m3.1) #Model without area give better predictions
+plot(coeftab(m3, m3.1)) #Although coefficients don't really change
+
+precis(m3.1)
+
+#Make a plot to interpret the continuous interaction
+
+sd_seq <- seq(from = -2, to = 2, length.out = 30)
+
+##Making a triptyrch plot for the continuous interaction
+par(mfrow=c(1,3))
+#For mean growing season = -1
+mu1 <- link(m3.1, data = data.frame(scaled.sd.growseason = sd_seq, scaled.growseason = -1))
+mu1_mean <- apply(mu1, 2, mean)
+mu1_PI <- apply(mu1, 2, PI)
+plot(log_langpc ~ scaled.sd.growseason, type = "none", xlim = c(-2,2), main = "mean growing season = -1", data = d)
+lines(sd_seq, mu1_mean, lwd = 2)
+shade(mu1_PI, sd_seq)
+#For mean growing season = 0
+mu2 <- link(m3.1, data = data.frame(scaled.sd.growseason = sd_seq, scaled.growseason = 0))
+mu2_mean <- apply(mu2, 2, mean)
+mu2_PI <- apply(mu2, 2, PI)
+plot(log_langpc ~ scaled.sd.growseason, type = "none", xlim = c(-2,2), main = "mean growing season = 0", data = d)
+lines(sd_seq, mu2_mean, lwd = 2)
+shade(mu2_PI, sd_seq)
+#For mean growing season = 1
+mu3 <- link(m3.1, data = data.frame(scaled.sd.growseason = sd_seq, scaled.growseason = 1))
+mu3_mean <- apply(mu3, 2, mean)
+mu3_PI <- apply(mu3, 2, PI)
+plot(log_langpc ~ scaled.sd.growseason, type = "none", xlim = c(-2,2), main = "mean growing season = 1", data = d)
+lines(sd_seq, mu3_mean, lwd = 2)
+shade(mu3_PI, sd_seq)
+
+#We can see from the plot that as the mean growing season gets longer, the slope of sd growing decreases. With short mean growing seasons, the variability of growing season does not have an effect, but with longer mean growing seasons, increasing variability decreases language diversity.
