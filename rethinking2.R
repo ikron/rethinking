@@ -2089,3 +2089,450 @@ lines(sd_seq, mu3_mean, lwd = 2)
 shade(mu3_PI, sd_seq)
 
 #We can see from the plot that as the mean growing season gets longer, the slope of sd growing decreases. With short mean growing seasons, the variability of growing season does not have an effect, but with longer mean growing seasons, increasing variability decreases language diversity.
+### * Chapter 9
+
+#Metropolis algorithm
+#1) Each week King decides whether to stay put for another week or move to an adjacent island
+#2) To decide where to move, King flips a coin: heads -> move clockwise, tails: move counterclokwise
+#3) To decide if to move, count the relative population size of the proposal island and the current island
+#4) If proposal island has a higher rel. pop. size always move there. If smaller, move there with the probability of rel.pop.size.proposal / rel.pop.size.current.
+
+num_weeks <- 1e5
+positions <- rep(0,num_weeks)
+current <- 10
+for ( i in 1:num_weeks ) {
+# record current position
+positions[i] <- current
+# flip coin to generate proposal
+proposal <- current + sample( c(-1,1) , size=1 )
+# now make sure he loops around the archipelago
+if ( proposal < 1 ) proposal <- 10
+if ( proposal > 10 ) proposal <- 1
+# move?
+prob_move <- proposal/current
+current <- ifelse( runif(1) < prob_move , proposal , current )
+}
+
+dat_slim <- list(
+log_gdp_std = dd$log_gdp_std,
+rugged_std = dd$rugged_std,
+cid = as.integer( dd$cid )
+)
+str(dat_slim)
+
+m9.1 <- ulam(
+alist(
+log_gdp_std ~ dnorm( mu , sigma ) ,
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ) ,
+a[cid] ~ dnorm( 1 , 0.1 ) ,
+b[cid] ~ dnorm( 0 , 0.3 ) ,
+sigma ~ dexp( 1 )
+) , data=dat_slim , chains=4, cores = 4 )
+
+precis( m9.1 , depth=2 )
+
+stancode(m9.1) #Shows the model in STAN code
+
+show(m9.1) #Shows information about the 
+
+pairs(m9.1)
+
+traceplot( m9.1 )
+
+trankplot( m9.1 , n_cols=2 ) #Trace rank plot.
+
+#Bookmark 9.5
+
+# U needs to return neg-log-probability
+U <- function( q , a=0 , b=1 , k=0 , d=1 ) {
+muy <- q[1]
+mux <- q[2]
+U <- sum( dnorm(y,muy,1,log=TRUE) ) + sum( dnorm(x,mux,1,log=TRUE) ) +
+dnorm(muy,a,b,log=TRUE) + dnorm(mux,k,d,log=TRUE)
+return( -U )
+}
+
+# gradient function
+# need vector of partial derivatives of U with respect to vector q
+U_gradient <- function( q , a=0 , b=1 , k=0 , d=1 ) {
+muy <- q[1]
+mux <- q[2]
+G1 <- sum( y - muy ) + (a - muy)/b^2 #dU/dmuy
+G2 <- sum( x - mux ) + (k - mux)/d^2 #dU/dmux
+return( c( -G1 , -G2 ) ) # negative bc energy is neg-log-prob
+}
+# test data
+set.seed(7)
+y <- rnorm(50)
+x <- rnorm(50)
+x <- as.numeric(scale(x))
+y <- as.numeric(scale(y))
+
+library(shape) # for fancy arrows
+Q <- list()
+Q$q <- c(-0.1,0.2)
+pr <- 0.3
+plot( NULL , ylab="muy" , xlab="mux" , xlim=c(-pr,pr) , ylim=c(-pr,pr) )
+step <- 0.03
+
+for ( i in 1:n_samples ) {
+Q <- HMC2( U , U_gradient , step , L , Q$q )
+if ( n_samples < 10 ) {
+for ( j in 1:L ) {
+K0 <- sum(Q$ptraj[j,]^2)/2 # kinetic energy
+lines( Q$traj[j:(j+1),1] , Q$traj[j:(j+1),2] , col=path_col , lwd=1+2*K0 )
+}
+points( Q$traj[1:L+1,] , pch=16 , col="white" , cex=0.35 )
+Arrows( Q$traj[L,1] , Q$traj[L,2] , Q$traj[L+1,1] , Q$traj[L+1,2] ,
+arr.length=0.35 , arr.adj = 0.7 )
+text( Q$traj[L+1,1] , Q$traj[L+1,2] , i , cex=0.8 , pos=4 , offset=0.4 )
+}
+points( Q$traj[L+1,1] , Q$traj[L+1,2] , pch=ifelse( Q$accept==1 , 16 , 1 ) ,
+col=ifelse( abs(Q$dH)>0.1 , "red" , "black" ) )
+}
+
+
+### ** Practise
+
+### *** Difficulty leve: Easy
+
+#9E1
+#3) The proposal distribution must be symmetric
+
+#9E2
+#In Gibbs sampling uses adaptive proposals. The distribution of the proposed parameter value adjusts itself intelligently, depending on current parameter values. This is done using conjugate pairs. Limitation is that conjugate priors are not necessarily good in all situations and number of parameters is limited. 
+
+#9E3
+#Discrete parameters: the sampler simulates a physical process, but a particle cannot move smoothly between two discrete states
+
+#9E4
+#n_eff is the number of samples adjusted by autocorrelation between sequential samples
+
+#9E5
+#Rhat should approach 1
+
+#9E6
+#Refer to figures in the book
+
+### *** Diificulty level: Medium
+
+#9M1
+data(rugged)
+d <- rugged
+d$log_gdp <- log(d$rgdppc_2000)
+dd <- d[ complete.cases(d$rgdppc_2000) , ]
+dd$log_gdp_std <- dd$log_gdp / mean(dd$log_gdp)
+dd$rugged_std <- dd$rugged / max(dd$rugged)
+dd$cid <- ifelse( dd$cont_africa==1 , 1 , 2 )
+
+dat_slim <- list(
+log_gdp_std = dd$log_gdp_std,
+rugged_std = dd$rugged_std,
+cid = as.integer( dd$cid )
+)
+str(dat_slim)
+
+m9.1 <- ulam(
+alist(
+log_gdp_std ~ dnorm(mu, sigma),
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ),
+a[cid] ~ dnorm(1 , 0.1),
+b[cid] ~ dnorm(0 , 0.3),
+sigma ~ dexp(1)
+), data=dat_slim, chains=4, cores = 4)
+
+m9.1b <- ulam(
+alist(
+log_gdp_std ~ dnorm(mu, sigma),
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ),
+a[cid] ~ dnorm(1 , 0.1),
+b[cid] ~ dnorm(0 , 0.3),
+sigma ~ dunif(0,10)
+), data=dat_slim, chains=4, cores = 4)
+
+plot(coeftab(m9.1, m9.1b)) #Parameter estimates are the same
+
+#9M2 Cauchy priors have not been explained in thie edition yet. But doing this for exponential
+#Plot prior distributions
+plot(seq(0, 10, length.out = 100), dexp(seq(0,10, length.out = 100), rate = 1), type = "l")
+lines(seq(0, 10, length.out = 100), dexp(seq(0,10, length.out = 100), rate = 2), type = "l", lty = "dashed")
+lines(seq(0, 10, length.out = 100), dexp(seq(0,10, length.out = 100), rate = 5), type = "l", lty = "dashed")
+lines(seq(0, 10, length.out = 100), dexp(seq(0,10, length.out = 100), rate = 10), type = "l", lty = "dashed")
+
+
+m9.1 <- ulam(
+alist(
+log_gdp_std ~ dnorm(mu, sigma),
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ),
+a[cid] ~ dnorm(1 , 0.1),
+b[cid] ~ dnorm(0 , 0.3),
+sigma ~ dexp(1)
+), data=dat_slim, chains=4, cores = 4)
+
+m9.1b <- ulam(
+alist(
+log_gdp_std ~ dnorm(mu, sigma),
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ),
+a[cid] ~ dnorm(1 , 0.1),
+b[cid] ~ dnorm(0 , 0.3),
+sigma ~ dexp(2)
+), data=dat_slim, chains=4, cores = 4)
+
+m9.1c <- ulam(
+alist(
+log_gdp_std ~ dnorm(mu, sigma),
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ),
+a[cid] ~ dnorm(1 , 0.1),
+b[cid] ~ dnorm(0 , 0.3),
+sigma ~ dexp(5)
+), data=dat_slim, chains=4, cores = 4)
+
+m9.1d <- ulam(
+alist(
+log_gdp_std ~ dnorm(mu, sigma),
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ),
+a[cid] ~ dnorm(1 , 0.1),
+b[cid] ~ dnorm(0 , 0.3),
+sigma ~ dexp(10)
+), data=dat_slim, chains=4, cores = 4)
+
+plot(coeftab(m9.1, m9.1b, m9.1c, m9.1d)) #No noticible influence (sigma is already quite close to zero)
+
+plot(seq(0, 10, length.out = 100), dcauchy(seq(0,10, length.out = 100), location = 0, scale = 0.1), type = "l")
+
+m9.1e <- ulam(
+alist(
+log_gdp_std ~ dnorm(mu, sigma),
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ),
+a[cid] ~ dnorm(1 , 0.1),
+b[cid] ~ dnorm(0 , 0.3),
+sigma ~ dcauchy(0, 0.1)
+), data=dat_slim, chains=4, cores = 4)
+
+m9.1f <- ulam(
+alist(
+log_gdp_std ~ dnorm(mu, sigma),
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ),
+a[cid] ~ dnorm(1 , 0.1),
+b[cid] ~ dnorm(0 , 0.3),
+sigma ~ dcauchy(0, 10)
+), data=dat_slim, chains=4, cores = 4)
+
+plot(coeftab(m9.1e, m9.1f))
+
+#9M3
+
+warm1 <- ulam(
+alist(
+log_gdp_std ~ dnorm(mu, sigma),
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ),
+a[cid] ~ dnorm(1 , 0.1),
+b[cid] ~ dnorm(0 , 0.3),
+sigma ~ dexp(1)
+), data=dat_slim, chains=4, cores = 4, warmup = 3, iter = 1003)
+
+warm2 <- ulam(
+alist(
+log_gdp_std ~ dnorm(mu, sigma),
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ),
+a[cid] ~ dnorm(1 , 0.1),
+b[cid] ~ dnorm(0 , 0.3),
+sigma ~ dexp(1)
+), data=dat_slim, chains=4, cores = 4, warmup = 100, iter = 1100)
+
+warm3 <- ulam(
+alist(
+log_gdp_std ~ dnorm(mu, sigma),
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ),
+a[cid] ~ dnorm(1 , 0.1),
+b[cid] ~ dnorm(0 , 0.3),
+sigma ~ dexp(1)
+), data=dat_slim, chains=4, cores = 4, warmup = 1000, iter = 2000)
+
+#Can check with command show() that models indeed have the same number of samples
+
+traceplot(warm1) #Chains have not converged
+precis(warm1, depth = 2) ##BAD! small n_eff and Rhat > 1
+trankplot(warm1)
+
+traceplot(warm2)
+precis(warm2, depth = 2) ##This is OK! Rhat = 1
+trankplot(warm2)
+
+traceplot(warm3)
+precis(warm3, depth = 2)
+
+### *** Difficulty level: Hard
+
+#9H1
+
+#Inspect posterior distribution
+mp <- ulam(
+alist(
+a ~ dnorm(0,1),
+b ~ dcauchy(0,1)
+),
+data=list(y=1),
+start=list(a=0,b=0),
+iter=1e4, warmup=100)
+
+plot(mp)
+post <- extract.samples(mp)
+plot(density(post$a))
+plot(density(post$b))
+
+##Trace plots are different because Cauchy distribution has no mean and variance (it is divergent?).
+
+#9H2
+data(WaffleDivorce)
+d <- WaffleDivorce
+# standardize predictor
+d$MedianAgeMarriage <- (d$MedianAgeMarriage-mean(d$MedianAgeMarriage))/sd(d$MedianAgeMarriage)
+d$Marriage <- (d$Marriage - mean(d$Marriage))/sd(d$Marriage)
+
+#dd <- d[complete.cases(d$rgdppc_2000) , ]
+d.trim <- d[ , c("Divorce","Marriage","MedianAgeMarriage") ]
+str(d.trim)
+
+m5.1 <- ulam(
+alist(
+Divorce ~ dnorm( mu , sigma ) ,
+mu <- a + bA * MedianAgeMarriage ,
+a ~ dnorm( 0 , 0.2 ) ,
+bA ~ dnorm( 0 , 0.5 ) ,
+sigma ~ dexp( 1 )
+) , data = d.trim, chains = 4, cores = 4, iter = 2000, log_lik = T)
+
+m5.2 <- ulam(
+alist(
+Divorce ~ dnorm( mu , sigma ) ,
+mu <- a + bR * Marriage ,
+a ~ dnorm( 0, 0.2 ) ,
+bR ~ dnorm( 0 , 0.5 ) ,
+sigma ~ dexp(1)
+) , data = d.trim, chains = 4, cores = 4, iter = 2000, log_lik = T)
+
+m5.3 <- ulam(
+alist(
+Divorce ~ dnorm( mu , sigma ) ,
+mu <- a + bR*Marriage + bA*MedianAgeMarriage ,
+a ~ dnorm(  0, 0.2 ) ,
+bR ~ dnorm( 0 , 0.5 ) ,
+bA ~ dnorm( 0 , 0.5 ) ,
+sigma ~ dexp(1)
+) ,
+data = d.trim, chains = 4, cores = 4, iter = 2000, log_lik = T)
+
+compare(m5.1, m5.2, m5.3, func = WAIC)
+compare(m5.1, m5.2, m5.3, func = PSIS)
+plot(coeftab(m5.1, m5.2, m5.3))
+
+#9H3
+
+N <- 100 #number of individuals
+height <- rnorm(N,10,2) #sim total height of each
+leg_prop <- runif(N,0.4,0.5) #leg as proportion of height
+leg_left <- leg_prop*height + rnorm( N , 0 , 0.02 ) #sim left leg as proportion + error
+leg_right <- leg_prop*height + rnorm( N , 0 , 0.02 ) # sim right leg as proportion + error
+
+# combine into data frame
+d <- data.frame(height,leg_left,leg_right)
+
+m5.8s <- ulam(
+alist(
+height ~ dnorm( mu , sigma ) ,
+mu <- a + bl*leg_left + br*leg_right ,
+a ~ dnorm( 10 , 100 ) ,
+bl ~ dnorm( 2 , 10 ) ,
+br ~ dnorm( 2 , 10 ) ,
+sigma ~ dexp( 1 )
+) ,
+data=d, chains=4,
+start=list(a=10,bl=0,br=0.1,sigma=1), log_lik = TRUE)
+
+m5.8s2 <- ulam(
+alist(
+height ~ dnorm( mu , sigma ) ,
+mu <- a + bl*leg_left + br*leg_right ,
+a ~ dnorm( 10 , 100 ) ,
+bl ~ dnorm( 2 , 10 ) ,
+br ~ dnorm( 2 , 10 ) ,
+sigma ~ dexp( 1 )
+) ,
+data=d, chains=4,
+constraints=list(br="lower=0"),
+start=list(a=10,bl=0,br=0.1,sigma=1), log_lik = TRUE)
+
+plot(coeftab(m5.8s, m5.8s2))
+##Since bl and br are perfectly correlated increasing estimate of br lowers the estimate of bl
+
+#9H4
+compare(m5.8s, m5.8s2)
+##Model where br is restricted has less parameters.
+
+#9H5
+
+##Modifying the metropolis algorithm, assuming the island have different population sizes that do not correspond to label order
+
+num_weeks <- 1e5
+positions <- rep(0,num_weeks)
+current <- 10
+pop.sizes <- c(5000, 3000, 8000, 15000, 4000, 2500, 25000, 3500, 4500, 6000)
+for ( i in 1:num_weeks ) {
+# record current position
+positions[i] <- current
+# flip coin to generate proposal
+proposal <- current + sample( c(-1,1) , size=1 )
+# now make sure he loops around the archipelago
+if ( proposal < 1 ) proposal <- 10
+if ( proposal > 10 ) proposal <- 1
+# move?
+prob_move <- pop.sizes[proposal]/pop.sizes[current]
+current <- ifelse( runif(1) < prob_move , proposal , current )
+}
+
+#Checking some results
+plot(1:100, positions[1:100], type = "l")
+
+plot(table(positions))
+plot(sort(pop.sizes), as.vector(sort(table(positions))), type = "l", ylab = "Number of weeks", xlab = "Population size")
+
+#9H6
+
+## My own metropolis algorithm for globe tossing data
+
+##How much of the globe is water?
+
+data <- rbinom(100, size = 1, prob = 0.8) #Simulated data of coin tosses
+nobs <- length(data)
+##Assuming that water = success
+success <- sum(data)
+prob <- seq(from = 0, to = 1, length.out = 100)
+start = 50 #index of prob
+burnin <- 10000
+iterations <- burnin + 10000
+post <- rep(0, iterations)
+sample <- rep(0, iterations)
+
+##prior
+prior = 0.5 #Uniform prior for all water probabilities
+
+##Do MCMC
+current.index <- start
+for(i in 1:iterations) {
+    current.likelihood <- dbinom(success, size = nobs, prob[current.index])
+    post[i] <- current.likelihood*prior
+    sample[i] <- prob[current.index]
+    proposal <- current.index + sample(c(-1,1), size = 1)
+    proposal.likelihood <- dbinom(success, size = nobs, prob[proposal])
+    prob.move <- (proposal.likelihood*prior)/(current.likelihood*prior)
+    current.index <- ifelse(runif(1) < prob.move, proposal, current.index)
+}
+##Standardise posterior
+post <- post/sum(post)
+    
+fsample <- sample[(burnin+1):iterations]
+
+plot(1:iterations, sample, type = "l")
+plot(density(fsample))
+quantile(fsample, probs = c(0.025, 0.5, 0.975)) #With sufficient amount of data and iterations, mcmc starts to convergen on the true value
