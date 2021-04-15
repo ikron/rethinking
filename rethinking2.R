@@ -2536,3 +2536,427 @@ fsample <- sample[(burnin+1):iterations]
 plot(1:iterations, sample, type = "l")
 plot(density(fsample))
 quantile(fsample, probs = c(0.025, 0.5, 0.975)) #With sufficient amount of data and iterations, mcmc starts to convergen on the true value
+### * Chapter 10
+
+#bookmark 10.2
+
+#"Histomancy: the ancient art of divining likelihood functions from empirical histograms" 
+
+#When using link (logit) functions:
+#Every predictor variable effectively interacts with every other predictor variable, whether you explicitly model them as interactions or not.
+#This can be understood easily from:
+# mu = alpha + beta*x #normal linear model
+#Taking the derivative: change in mu with respect to x is:
+#dmu/dx = beta, which is constant
+#No consider binomial probability p with respect to predictor x
+# p = exp(alpha + beta*x) / (1 + exp(alpha  beta*x))
+#dmu/dx = beta / 2(1 + cosh(alpha + beta*x))
+#x appears in the derivative, the impact of change in x depends upon x
+
+#Note: you cannot use information criteria to compare models with different likelihood functions!
+
+### * Chapter 11
+
+
+data(chimpanzees)
+d <- chimpanzees
+
+d$treatment <- 1 + d$prosoc_left + 2*d$condition
+xtabs( ~ treatment + prosoc_left + condition , d )
+
+m11.1 <- quap(
+alist(
+pulled_left ~ dbinom( 1 , p ) ,
+logit(p) <- a ,
+a ~ dnorm( 0 , 1.5 )
+) , data=d )
+
+prior <- extract.prior( m11.1 , n=1e4 )
+p <- inv_logit( prior$a )
+dens( p , adj=0.1 )
+
+dat_list <- list(
+pulled_left = d$pulled_left,
+actor = d$actor,
+treatment = as.integer(d$treatment) )
+
+m11.4 <- ulam(
+alist(
+pulled_left ~ dbinom( 1 , p ) ,
+logit(p) <- a[actor] + b[treatment] ,
+a[actor] ~ dnorm( 0 , 1.5 ),
+b[treatment] ~ dnorm( 0 , 0.5 )
+) , data=dat_list , chains=4 , log_lik=TRUE )
+precis( m11.4 , depth=2 )
+
+#bookmark 11.1.2
+
+
+data(UCBadmit)
+d <- UCBadmit
+
+dat_list <- list(
+admit = d$admit,
+applications = d$applications,
+gid = ifelse( d$applicant.gender=="male" , 1 , 2 )
+)
+
+m11.7 <- ulam(
+    alist(
+        admit ~ dbinom( applications , p ) ,
+logit(p) <- a[gid] ,
+a[gid] ~ dnorm( 0 , 1.5 )
+) , data=dat_list , chains=4 )
+precis( m11.7 , depth=2 )
+
+post <- extract.samples(m11.7)
+diff_a <- post$a[,1] - post$a[,2]
+diff_p <- inv_logit(post$a[,1]) - inv_logit(post$a[,2])
+precis( list( diff_a=diff_a , diff_p=diff_p ) )
+
+postcheck( m11.7 )
+# draw lines connecting points from same dept
+for ( i in 1:6 ) {
+x <- 1 + 2*(i-1)
+y1 <- d$admit[x]/d$applications[x]
+y2 <- d$admit[x+1]/d$applications[x+1]
+lines( c(x,x+1) , c(y1,y2) , col=rangi2 , lwd=2 )
+text( x+0.5 , (y1+y2)/2 + 0.05 , d$dept[x] , cex=0.8 , col=rangi2 )
+}
+
+dat_list$dept_id <- rep(1:6,each=2)
+
+m11.8 <- ulam(
+alist(
+admit ~ dbinom( applications , p ) ,
+logit(p) <- a[gid] + delta[dept_id] ,
+a[gid] ~ dnorm( 0 , 1.5 ) ,
+delta[dept_id] ~ dnorm( 0 , 1.5 )
+) , data=dat_list , chains=4 , iter=4000 )
+precis( m11.8 , depth=2 )
+
+post <- extract.samples(m11.8)
+diff_a <- post$a[,1] - post$a[,2]
+diff_p <- inv_logit(post$a[,1]) - inv_logit(post$a[,2])
+precis( list( diff_a=diff_a , diff_p=diff_p ) )
+
+#bookmark 11.6
+
+### ** Practise problems
+
+### *** Difficulty level: Easy
+
+#11E1
+#P(event) = 0.35
+#log-odds(event) = logit(0.35) = -0.62
+
+#11E2
+#log-odds(event) = 3.2
+#P(event) = inv_logit(3.2) = 0.96
+
+#11E3
+#exp(1.7) = 5.47
+#change in proportional odds
+
+#11E4
+#If samples have different aggregation time periods, one can use offset to express the rate at the same scale
+
+### *** Difficulty level: Medium
+
+#11M1
+#Even though the data and inferences are the same, when data are in the aggregated format the model will contain an additional term. From the formula of binomial probability, we will count the ways in which particular combination of successes and failures can happen. This will cause likelihoods to be different.
+
+#11M2
+#exp(1.7) = 5.47. Proportional change in the count will be 5.47 when predictor variable increases by one unit.
+
+#11M3
+#Logit link constrains the output of the model to be between 0 and 1. This makes sense if we are trying to model a probability that is between 0 and 1 with a linear model that can have any real number.
+
+#11M4
+#Log-link ensures that the parameter value is the exponentiation of the linear model. We can never obtain negative values for a Poisson distribution.
+
+#11M5
+#Using a logit-link implies that the mean is between 0 and 1. Poisson process has an unknown maximum, so this would limit the model output quite a lot. We could not come up with an example where this would make sense.
+
+#11M6
+#Binomial distribution has maximum entropy when:
+#outcomes are discrete and binary
+#probability of each outcome is constant
+
+#Poisson is a special case of the binomial where n -> infinity and p -> 0. This does not change the constraints.
+
+
+### *** Difficulty level: Hard
+
+#11H1
+data(chimpanzees)
+d <- chimpanzees
+
+d$treatment <- 1 + d$prosoc_left + 2*d$condition
+xtabs( ~ treatment + prosoc_left + condition , d )
+d$side <- d$prosoc_left + 1 # right 1, left 2
+d$cond <- d$condition + 1 # no partner 1, partner 2
+
+dat_list <- list(
+pulled_left = d$pulled_left,
+actor = d$actor,
+side = d$side,
+cond = d$cond,    
+treatment = as.integer(d$treatment) )
+
+m11.4 <- ulam(
+alist(
+pulled_left ~ dbinom( 1 , p ) ,
+logit(p) <- a[actor] + b[treatment] ,
+a[actor] ~ dnorm( 0 , 1.5 ),
+b[treatment] ~ dnorm( 0 , 0.5 )
+) , data=dat_list , chains=4 , log_lik=TRUE )
+precis( m11.4 , depth=2 )
+
+m11.4.q <- quap(
+    alist(
+        pulled_left ~ dbinom( 1 , p ) ,
+        logit(p) <- a[actor] + b[treatment] ,
+        a[actor] ~ dnorm( 0 , 1.5 ),
+        b[treatment] ~ dnorm( 0 , 0.5 )
+        ), data = dat_list)
+
+precis(m11.4.q, depth = 2)
+
+plot(coeftab(m11.4, m11.4.q))
+
+#Chimp 2 always pulls the lever, so estimate is very uncertain. Probably with different priors there could be some differences
+
+#11H2
+
+#Fitting the other models
+m11.5 <- ulam(
+alist(
+pulled_left ~ dbinom( 1 , p ) ,
+logit(p) <- a[actor] + bs[side] + bc[cond] ,
+a[actor] ~ dnorm( 0 , 1.5 ),
+bs[side] ~ dnorm( 0 , 0.5 ),
+bc[cond] ~ dnorm( 0 , 0.5 )
+) , data=dat_list , chains=4 , log_lik=TRUE )
+
+m11.2 <- ulam(
+alist(
+pulled_left ~ dbinom( 1 , p ) ,
+logit(p) <- a + b[treatment] ,
+a ~ dnorm( 0 , 1.5 ),
+b[treatment] ~ dnorm( 0 , 10 )
+) , data=dat_list , chains=4 , log_lik=TRUE )
+
+compare(m11.4, m11.2, m11.5, func = WAIC) #Allowing individual intercepts for each actor improves predictions a lot
+
+#11H3
+
+#a)
+
+library(MASS)
+data(eagles)
+
+##Making dummy variables for factors
+eagles$piratesize <- ifelse(eagles$P == "L", 1, 2)
+eagles$victimsize <- ifelse(eagles$V == "L", 1, 2)
+eagles$adult <- ifelse(eagles$A == "A", 1, 2)
+
+m1q <- quap(
+    alist(
+        y ~ dbinom(n, p),
+        logit(p) <- a + bP[piratesize] + bV[victimsize] + bA[adult],
+        a ~ dnorm(0,1.5),
+        bP[piratesize] ~ dnorm(0,0.5),
+        bV[victimsize] ~ dnorm(0,0.5),
+        bA[adult] ~ dnorm(0,0.5)
+    ),
+    data = eagles)
+
+m1 <- ulam(
+    alist(
+        y ~ dbinom(n, p),
+        logit(p) <- a + bP[piratesize] + bV[victimsize] + bA[adult],
+        a ~ dnorm(0,1.5),
+        bP[piratesize] ~ dnorm(0,0.5),
+        bV[victimsize] ~ dnorm(0,0.5),
+        bA[adult] ~ dnorm(0,0.5)
+    ),
+    data = eagles, chains = 4, log_lik=TRUE )
+
+pairs(m1)
+plot(coeftab(m1q, m1)) #Quadratic approximation seems mostly okay, some posterior distributions look a bit skewed so I'll stick to MCMC estimates
+
+postcheck(m1)
+postcheck(m1q)
+#b)
+
+#Dummy data for predictions across treatments
+eagles.pred <- data.frame(
+    piratesize = c(1,1,1,1,2,2,2,2),
+    victimsize = c(1,1,2,2,1,1,2,2),
+    adult =      c(1,2,1,2,1,2,1,2)
+)
+
+modelpred <- link(m1, data = eagles.pred)
+pred.p <- apply(modelpred, 2, mean)
+pred.p.PI <- apply(modelpred, 2, PI)
+
+#Plotting
+plot(0, 0, type = "n", xlab = "Case", ylab = "P(pirating succesful)", ylim = c(0,1), xaxt = "n", xlim = c(1,8))
+axis(1, at = 1:8, labels=c("L/L/A", "L/L/Y", "L/S/A", "L/S/Y", "S/L/A", "S/L/Y", "S/S/A", "S/S/Y"))
+##plot observed and predicted probabilities
+obs.p <- c(eagles[1,1]/eagles[1,2], eagles[3,1]/eagles[3,2], eagles[2,1]/eagles[2,2], eagles[4,1]/eagles[4,2], eagles[5,1]/eagles[5,2], eagles[7,1]/eagles[7,2], eagles[6,1]/eagles[6,2], eagles[8,1]/eagles[8,2])
+lines(1:8, obs.p, col = rangi2, lwd = 1.5)
+lines(1:8, pred.p)
+shade(pred.p.PI, 1:8)
+
+#Observed and predicted counts
+simobs <- sim(m1, data = eagles)
+count.pred <- apply(simobs, 2, mean)
+count.pred.PI <- apply(simobs, 2, PI)
+
+plot(0, 0, type = "n", xlab = "Case", ylab = "Number of successes", ylim = c(0,30), xaxt = "n", xlim = c(1,8))
+axis(1, at = 1:8, labels=c("L/L/A", "L/L/Y", "L/S/A", "L/S/Y", "S/L/A", "S/L/Y", "S/S/A", "S/S/Y"))
+obs.count <- eagles[,1]
+lines(1:8, obs.count, col = rangi2, lwd = 1.5)
+lines(1:8, count.pred)
+shade(count.pred.PI, 1:8)
+
+#Looking at the predicted probabilities helps to understand the model. Looking at the predicted counts, helps to evaluate the model.
+
+#c)
+
+#Interaction between pirate size and age
+
+#Need a new predictor with both pirate size and age for the interaction
+eagles$pirate <- c(1, 1, 2, 2, 3, 3, 4, 4)
+
+
+m2.2 <- ulam(
+    alist(
+        y ~ dbinom(n, p),
+        logit(p) <- a + bP[piratesize] + bV[victimsize] + bA[adult] + bI[pirate],
+        a ~ dnorm(0,1.5),
+        bP[piratesize] ~ dnorm(0,0.5),
+        bV[victimsize] ~ dnorm(0,0.5),
+        bI[pirate] ~ dnorm(0,0.5),
+        bA[adult] ~ dnorm(0,0.5)
+    ),
+    data = eagles, chains = 4, log_lik=TRUE )
+
+precis(m2.2, depth = 2)
+
+eagles.pred2 <- data.frame(
+    piratesize = c(1,1,1,1,2,2,2,2),
+    victimsize = c(1,1,2,2,1,1,2,2),
+    adult =      c(1,2,1,2,1,2,1,2),
+    pirate =     c(1,2,1,2,3,4,3,4)
+)
+
+modelpred2 <- link(m2.2, data = eagles.pred2)
+pred.p2 <- apply(modelpred2, 2, mean)
+pred.p.PI2 <- apply(modelpred2, 2, PI)
+
+#Plotting
+plot(0, 0, type = "n", xlab = "Case", ylab = "P(pirating succesful)", ylim = c(0,1), xaxt = "n", xlim = c(1,8))
+axis(1, at = 1:8, labels=c("L/L/A", "L/L/Y", "L/S/A", "L/S/Y", "S/L/A", "S/L/Y", "S/S/A", "S/S/Y"))
+##plot observed and predicted probabilities
+obs.p <- c(eagles[1,1]/eagles[1,2], eagles[3,1]/eagles[3,2], eagles[2,1]/eagles[2,2], eagles[4,1]/eagles[4,2], eagles[5,1]/eagles[5,2], eagles[7,1]/eagles[7,2], eagles[6,1]/eagles[6,2], eagles[8,1]/eagles[8,2])
+lines(1:8, obs.p, col = rangi2, lwd = 1.5)
+lines(1:8, pred.p2)
+shade(pred.p.PI2, 1:8)
+
+compare(m1, m2.2, func = WAIC) #Adding the interaction in the model improves predictions.
+
+#11H4
+
+data(salamanders)
+d <- salamanders
+#scaling the data
+d$cover <- scale(d$PCTCOVER)
+d$stage <- scale(d$FORESTAGE)
+
+m1q <- quap(
+    alist(
+        SALAMAN ~ dpois(lambda),
+        log(lambda) <- a + bC*cover,
+        a ~ dnorm(0,1),
+        bC ~ dnorm(0,0.5)
+        ),
+    data = d)
+
+#Prior predictive check
+prior <- extract.prior( m1q , n=1e4 )
+p <- exp(prior$a)
+dens(p, adj = 0.5)
+
+pB <- exp(prior$bC)
+dens(pB, adj = 0.5)
+
+m1 <- ulam(
+    alist(
+        SALAMAN ~ dpois(lambda),
+        log(lambda) <- a + bC*cover,
+        a ~ dnorm(0,1),
+        bC ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 4,  log_lik=TRUE)
+
+plot(coeftab(m1q, m1))
+
+postcheck(m1) #Quite many sites are badly predicted
+
+cover.seq <- seq(from = -2, to = 2, length.out = 100)
+predictions <- link(m1, data = data.frame(cover = cover.seq))
+pred.mean <- apply(predictions, 2, mean)
+pred.PI <- apply(predictions, 2, PI)
+
+plot(d$cover, d$SALAMAN)
+lines(cover.seq, pred.mean, col = rangi2)
+shade(pred.PI, cover.seq)
+
+#Trying to improve the model, by including forest age
+
+m2 <- ulam(
+    alist(
+        SALAMAN ~ dpois(lambda),
+        log(lambda) <- a + bC*cover + bF*stage,
+        a ~ dnorm(0,1),
+        bC ~ dnorm(0,0.5),
+        bF ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 4,  log_lik=TRUE)
+
+plot(m2) #estimate of forest age is 0
+
+#Interaction effect
+m3 <- ulam(
+    alist(
+        SALAMAN ~ dpois(lambda),
+        log(lambda) <- a + bC*cover + bF*stage + bCF*cover*stage,
+        a ~ dnorm(0,1),
+        bC ~ dnorm(0,0.5),
+        bF ~ dnorm(0,0.5),
+        bCF ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 4,  log_lik=TRUE)
+
+plot(m3)
+
+
+m4 <- ulam(
+    alist(
+        SALAMAN ~ dpois(lambda),
+        log(lambda) <- a + bF*stage,
+        a ~ dnorm(0,1),
+        bF ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 4,  log_lik=TRUE)
+
+compare(m1, m2, m3, m4, func = WAIC) #Including forest age does not improve predictions, model with only forest cover is preferred
+
+plot(coeftab(m1, m2, m3, m4))
+
+##Forest age does not seem to improve the model
+## Forest age and cover are strongly correlated, all sites that have low cover are very young. Forest cover also does not predict number of salamanders very well, this looks like a missing variable problem. There is some important aspect of salamander ecology that is not included in the model.
+
