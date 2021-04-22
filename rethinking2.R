@@ -2960,3 +2960,507 @@ plot(coeftab(m1, m2, m3, m4))
 ##Forest age does not seem to improve the model
 ## Forest age and cover are strongly correlated, all sites that have low cover are very young. Forest cover also does not predict number of salamanders very well, this looks like a missing variable problem. There is some important aspect of salamander ecology that is not included in the model.
 
+### * Chapter 12
+
+##We are introduced to the Dirichlet (diRIKlay)
+
+### ** Practice problems
+
+### *** Difficulty level: Easy
+
+#12E1
+
+#For ordered categorical variables the variables levels have a natural order, such as "disagree, agree, strongly agree" etc. For unordered variables the levels do not have such an order. For example "apple, orange, banana".
+
+#12E2
+#The link function is: log( Pr(y_i <= k) / (1 - Pr(y_i <= k) ) ) = a_k
+#each categorical level has its own intercept. Each intercept is on the log-cumulative-odds scale.
+
+#12E3
+#Since 0's can often arise in multiple ways, using a model with no zero-inflation can produce a result where we underestime the actual rate parameter.
+
+#12E4
+
+#Overdispersion
+#Overdispersion happens when there is greater variability in the data than expected under the statistical model. Typically arises because of some heterogeneity we have not taken into account. E.g. males and females have different rates and not included in the model.
+
+#Underdispersion
+#There is less variability than accounted for by the statistical model. Example could be a time series that is higly autocorrelated.
+
+### *** Difficulty level: Medium
+
+#12M1
+ratings <- c(rep("1", 12), rep("2",36), rep("3",7), rep("4",41))
+
+#Compute log cumulative odds of each rating
+#Proportion of each response value
+pr_k <- table(ratings) / length(ratings)
+
+#Convert to cumulative proportions
+cum_pr_k <- cumsum(pr_k)
+
+#cumulative log-odds
+logit <- function(x) log(x/(1-x)) # convenience function
+round( lco <- logit( cum_pr_k ) , 2 )
+
+#12M2
+plot( 1:4 , cum_pr_k , type="b" , xlab="response" ,
+ylab="cumulative proportion" , ylim=c(0,1) )
+lines(1:4, pr_k, type = "p", col = "red")
+
+#12M3
+#Change the Poisson likelihood to binomial
+# pz - probability of zero
+# n - number of trials
+# p - probability of success in trial
+# Pr(0|pz,n,p) = pz + (1-pz)*(1-p)^n
+# Pr(k|pz,n,p) = (1-pz)*P_binom(k,n,p) = (1-pz)*C(n,k)*p^k*(1-p)^n-k
+
+### *** Difficulty level: Hard
+
+#12H1
+
+data(Hurricanes)
+d <- Hurricanes
+d$sfem <- scale(d$femininity) #scale femininity variable
+
+#Intercept only
+m12.1 <- ulam(
+    alist(
+        deaths ~ dpois(lambda),
+        log(lambda) <- a,
+        a ~ dnorm(0,0.5)
+    ),
+    data = d, log_lik=TRUE)
+
+#Intercept and femininity
+m12.2 <- ulam(
+    alist(
+        deaths ~ dpois(lambda),
+        log(lambda) <- a + bf*sfem,
+        a ~ dnorm(0,0.5),
+        bf ~ dnorm(0,0.5)
+    ),
+    data = d, log_lik=TRUE)
+
+prior <- extract.prior( m12.2 , n=1e4 )
+p <- exp( prior$a )
+dens( p , adj=0.1 )
+
+p <- exp( prior$bf )
+dens( p , adj=0.1 )
+
+compare(m12.1, m12.2, func = WAIC) #Model with femininity gets all the weight
+
+psis_m12.2 <- PSIS(m12.2, pointwise = TRUE)
+waic_m12.2 <- WAIC(m12.2, pointwise = TRUE)
+
+#waic_m7h1.2 <- WAIC(m7h1.2, pointwise = TRUE)
+#psis_m7h1.2 <- PSIS(m7h1.2, pointwise = TRUE)
+
+plot(psis_m12.2$k, waic_m12.2$penalty, xlab="PSIS Pareto k" ,
+ylab="WAIC penalty", col=rangi2, lwd=2 ) #Many observations that the model predicts poorly
+
+d[psis_m12.2$k > 0.5,] #All hurricanes with lot of deaths
+
+precis(m12.2)
+
+pairs(m12.2)
+
+postcheck(m12.2) #Model does not fit the data very well, especially when there are hurricanes with large numbers of deaths
+
+plot(d$femininity, d$deaths) #Some very devastating hurricanes have had feminine names
+
+post <- extract.samples(m12.2)
+
+##Compute counterfactual predictions
+fem.seq <- seq(from = -2, to = 2, length.out = 100)
+lambda.pred <- link(m12.2, data = data.frame(sfem = fem.seq))
+lambda.med <- apply(lambda.pred, 2, median)
+lambda.PI <- apply(lambda.pred, 2,  PI)
+
+##Plot again
+plot(d$sfem, d$deaths)
+lines(fem.seq, lambda.med, lty = 2)
+shade(lambda.PI, fem.seq, col = col.alpha("black", 0.1))
+
+##The model is quite bad, it predicts almost none of the observations.
+
+#12H2
+
+##Counts in the last model very clearly over-dispersed
+##Fitting a gamma-Poisson model
+
+ # map2stan model fit
+     # constraint on scale is passed via contraints list
+     m12h2.1 <- ulam(
+         alist(
+             deaths ~ dgampois( mu , scale ),
+             log(mu) <- a + b*sfem,
+             a ~ dnorm(0,0.5),
+             b ~ dnorm(0,0.5),
+             scale ~ dcauchy(0,2)
+         ),
+         data=d,
+         constraints=list(scale="lower=0"),
+         start=list(scale=2) )
+
+plot(m12h2.1)
+pairs(m12h2.1)
+
+precis(m12h2.1) #estimate of b now overlaps with zero
+
+post <- extract.samples(m12h2.1)
+
+##draw posterior mean gamma distribution
+curve(dgamma2(x,mean(exp(post$a)),mean(exp(post$scale))), from = 0, to = 60, ylab = "Density", xlab = "Deaths", ylim = c(0,0.2), lwd = 2)
+##draw 100 gamma distributions sampled from the posterior
+for(i in 1:100) {
+    mu <- exp(post$a[i])
+    scale <- exp(post$scale[i])
+    curve(dgamma2(x,mu,scale), add = TRUE, col = col.alpha("black", 0.2))
+}
+
+##Compute counterfactual predictions
+fem.seq <- seq(from = -2, to = 2, length.out = 100)
+lambda.pred <- link(m12h2.1, data = data.frame(sfem = fem.seq))
+lambda.med <- apply(lambda.pred, 2, median)
+lambda.PI <- apply(lambda.pred, 2,  PI)
+
+##Plot again
+plot(d$sfem, d$deaths)
+lines(fem.seq, lambda.med, lty = 2)
+shade(lambda.PI, fem.seq, col = col.alpha("black", 0.1))
+
+##Allowing heterogeneity for hurricanes improves the model a bit, and estimate of b now includes zero.
+
+#12H3
+
+d$minpres <- scale(d$min_pressure)
+d$sdamage <- scale(d$damage_norm)
+
+##Model with femininity and pressure
+model1 <- ulam(
+    alist(
+        deaths ~ dpois(lambda),
+        log(lambda) <- a + Bfp*sfem*minpres,
+        a ~ dnorm(0,0.5),
+        Bfp ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 2, cores = 2, warmup = 1000, iter = 4000, log_lik=TRUE)
+
+##Model with femininity and damage
+model2 <- ulam(
+    alist(
+        deaths ~ dpois(lambda),
+        log(lambda) <- a + Bd*sdamage + Bfd*sfem*sdamage,
+        a ~ dnorm(0,0.5),
+        Bd ~ dnorm(0,0.5),
+        Bfd ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 2, cores = 2, warmup = 1000, iter = 4000, log_lik=TRUE)
+
+##Model with both interactions
+model3 <- ulam(
+    alist(
+        deaths ~ dpois(lambda),
+        log(lambda) <- a + Bfp*sfem*minpres + Bfd*sfem*sdamage,
+        a ~ dnorm(0,0.5),
+        c(Bfp, Bfd) ~ dnorm(0,0.5)
+        ),
+     data = d, chains = 2, cores = 2, warmup = 1000, iter = 4000, log_lik=TRUE)
+
+##Comparing the models
+compare(model1, model2, model3, func = WAIC) #Model 2 is clearly preferred
+plot(coeftab(model1, model2, model3))
+
+#Plot model predictions
+dam.seq <- seq(from = -1, to = 6, length.out = 30)
+
+# "masculine" storms
+prediction.data.male <- data.frame(
+  sfem = -1,
+  sdamage = dam.seq
+)
+lambda.male <- link(model2, data = prediction.data.male)
+lambda.male.mu <- apply(lambda.male, MARGIN = 2, FUN = mean)
+lambda.male.PI <- apply(lambda.male, MARGIN = 2, FUN = PI)
+
+# "feminine" storms
+prediction.data.female <- data.frame(
+  sfem = 1,
+  sdamage = dam.seq
+)
+lambda.female <- link(model2, data = prediction.data.female)
+lambda.female.mu <- apply(lambda.female, MARGIN = 2, FUN = mean)
+lambda.female.PI <- apply(lambda.female, MARGIN = 2, FUN = PI)
+
+plot(d$sdamage, d$deaths, pch=ifelse(d$sfem>0,16,1), col = rangi2, xlab = "Damage", ylab = "Deaths")
+lines( dam.seq , lambda.male.mu , lty=2 )
+shade( lambda.male.PI , dam.seq )
+lines( dam.seq , lambda.female.mu , lty=1 )
+shade( lambda.female.PI , dam.seq )
+
+##For storms that caused a lot of damage, the predicted effect sizes for 'female' storms are not sensible
+
+#12H4
+
+#Logarithm of storm damage
+d$logdamage <- log(d$damage_norm)
+
+##Model with femininity and damage
+model4 <- ulam(
+    alist(
+        deaths ~ dpois(lambda),
+        log(lambda) <- a + Bd*logdamage + Bfd*sfem*logdamage,
+        a ~ dnorm(0,0.5),
+        Bd ~ dnorm(0,0.5),
+        Bfd ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 2, cores = 2, warmup = 1000, iter = 4000, log_lik=TRUE)
+
+##Comparing the models
+compare(model2, model4, func = WAIC) #Model 4 (with log damage) gives better predictions
+plot(coeftab(model2, model4))
+
+precis(model4)
+
+postcheck(model4)
+
+damlog.seq <- seq(from = 0, to = 12, length.out = 40)
+
+# "masculine" storms
+prediction.data.male <- data.frame(
+  sfem = -1,
+  logdamage = damlog.seq
+)
+log.lambda.male <- link(model4, data = prediction.data.male)
+log.lambda.male.mu <- apply(log.lambda.male, MARGIN = 2, FUN = mean)
+log.lambda.male.PI <- apply(log.lambda.male, MARGIN = 2, FUN = PI)
+
+# "feminine" storms
+prediction.data.female <- data.frame(
+  sfem = 1,
+  logdamage = damlog.seq
+)
+log.lambda.female <- link(model4, data = prediction.data.female)
+log.lambda.female.mu <- apply(log.lambda.female, MARGIN = 2, FUN = mean)
+log.lambda.female.PI <- apply(log.lambda.female, MARGIN = 2, FUN = PI)
+
+plot(d$logdamage, d$deaths, pch=ifelse(d$sfem>0,16,1), col = rangi2, xlab = "Damage", ylab = "Deaths")
+lines( damlog.seq , log.lambda.male.mu , lty=2 )
+shade( log.lambda.male.PI , damlog.seq )
+lines( damlog.seq , log.lambda.female.mu , lty=1 )
+shade( log.lambda.female.PI , damlog.seq )
+
+#The model does fit better, but it is still quite bad
+
+#12H5
+
+data(Trolley)
+d <- Trolley
+d <- d[,-1]
+
+#The question is whether women are more or less bothered by contact than men?
+
+#with interactions
+model0 <- ulam(
+alist(
+    response ~ dordlogit( phi , cutpoints ),
+    phi <- bC*contact + bA*action + bI*intention,
+    c(bA, bC, bI) ~ dnorm(0, 0.5),
+    cutpoints ~ dnorm(0,1.5)
+    ) ,
+data=d,
+start=list(cutpoints=c(-2,-1,0,1,2,2.5)) ,
+chains=2 , cores=2, log_lik=TRUE )
+
+model1 <- ulam(
+alist(
+    response ~ dordlogit( phi , cutpoints ),
+    phi <- bC*contact + bA*action + bI*intention + bM*male,
+    c(bA, bC, bI, bM) ~ dnorm(0, 0.5),
+    cutpoints ~ dnorm(0,1.5)
+    ) ,
+data=d,
+start=list(cutpoints=c(-2,-1,0,1,2,2.5)) ,
+chains=2 , cores=2, log_lik=TRUE )
+
+model2 <- ulam(
+alist(
+    response ~ dordlogit( phi , cutpoints ),
+    phi <- bC*contact + bA*action + bI*intention + bM*male + bMC*male*contact,
+    c(bA, bC, bI, bM, bMC) ~ dnorm(0, 0.5),
+    cutpoints ~ dnorm(0,1.5)
+    ) ,
+data=d,
+start=list(cutpoints=c(-2,-1,0,1,2,2.5)) ,
+chains=2 , cores=2, log_lik=TRUE )
+
+compare(model0, model1, model2, func = WAIC) #Model 2 and 1 are more or less equal, both are much better than model0
+#Using model2 for now on
+
+precis(model2)
+
+post <- data.frame(extract.samples(model2))
+
+#Empty plot
+plot( 1 , 1 , type="n" , xlab="contact" , ylab="probability" ,
+     xlim=c(0,1) , ylim=c(0,1) , xaxp=c(0,1,1) , yaxp=c(0,1,2) )
+
+kI <- 0 # value for intention
+kA <- 0 # value for action
+kC <- 0:1 # values of contact to calculate over
+M <- 1 #Males or females
+for ( s in 1:100 ) {
+p <- post[s,]
+ak <- as.numeric(p[1:6])
+phi <- p$bC*kC + p$bA*kA + p$bI*kI + p$bM*M + p$bMC*kC*M
+pk <- pordlogit( 1:6 , a=ak , phi=phi )
+for ( i in 1:6 )
+lines( kC , pk[,i] , col=col.alpha(rangi2,0.1) )
+}
+mtext( concat( "action=",kA,", intention=",kI ) )
+
+M <- 0 #Females
+for ( s in 1:100 ) {
+p <- post[s,]
+ak <- as.numeric(p[1:6])
+phi <- p$bC*kC + p$bA*kA + p$bI*kI + p$bM*M + p$bMC*kC*M
+pk <- pordlogit( 1:6 , a=ak , phi=phi )
+for ( i in 1:6 )
+lines( kC , pk[,i] , col=col.alpha("hotpink",0.1) )
+}
+
+##There is a small interaction effect for contact and gender
+
+#12H6
+
+data(Fish)
+d <- Fish
+d$loghours <- log(d$hours)
+
+##Problem is to find out how many fish are caught per hour by park visitors
+
+model0 <- ulam(
+    alist(
+        fish_caught ~ dzipois(p, lambda),
+        logit(p) <- ap,
+        log(lambda) <- loghours + al,
+        ap ~ dnorm(0,1),
+        al ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 2, cores = 2, log_lik=TRUE)
+
+precis(model0)
+logistic(-0.72) #Probability to fish 0.33
+exp(-0.14) #0.87 fish caught per hour, when fishing
+
+
+model1 <- ulam(
+    alist(
+        fish_caught ~ dzipois(p, lambda),
+        logit(p) <- ap + BpC1*camper,
+        log(lambda) <- loghours + al,
+        ap ~ dnorm(0,1),
+        BpC1 ~ dnorm(0,1),
+        al ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 2, cores = 2, log_lik=TRUE)
+
+model2 <- ulam(
+    alist(
+        fish_caught ~ dzipois(p, lambda),
+        logit(p) <- ap + BpC1*camper,
+        log(lambda) <- loghours + al + BlB*livebait,
+        ap ~ dnorm(0,1),
+        BpC1 ~ dnorm(0,1),
+        BlB ~ dnorm(0,1),
+        al ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 2, cores = 2, log_lik=TRUE)
+
+model3 <- ulam(
+    alist(
+        fish_caught ~ dzipois(p, lambda),
+        logit(p) <- ap + BpC1*camper + BpC2*child,
+        log(lambda) <- loghours + al + BlB*livebait,
+        ap ~ dnorm(0,1),
+        c(BpC1, BpC2) ~ dnorm(0,1),
+        BlB ~ dnorm(0,1),
+        al ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 2, cores = 2, log_lik=TRUE)
+
+model4 <- ulam(
+    alist(
+        fish_caught ~ dzipois(p, lambda),
+        logit(p) <- ap + BpC1*camper + BpC2*child + BpP*persons,
+        log(lambda) <- loghours + al + BlB*livebait,
+        ap ~ dnorm(0,1),
+        c(BpC1, BpC2, BpP) ~ dnorm(0,1),
+        BlB ~ dnorm(0,1),
+        al ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 2, cores = 2, log_lik=TRUE)
+
+model5 <- ulam(
+    alist(
+        fish_caught ~ dzipois(p, lambda),
+        logit(p) <- ap + BpC1*camper + BpC2*child + BpP*persons,
+        log(lambda) <- loghours + al + BlB*livebait + BlP*persons,
+        ap ~ dnorm(0,1),
+        c(BpC1, BpC2, BpP) ~ dnorm(0,1),
+        c(BlB, BlP) ~ dnorm(0,1),
+        al ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 2, cores = 2, log_lik=TRUE)
+
+model6 <- ulam(
+    alist(
+        fish_caught ~ dzipois(p, lambda),
+        logit(p) <- ap + BpC1*camper + BpC2*child,
+        log(lambda) <- loghours + al + BlB*livebait + BlP*persons,
+        ap ~ dnorm(0,1),
+        c(BpC1, BpC2) ~ dnorm(0,1),
+        c(BlB, BlP) ~ dnorm(0,1),
+        al ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 2, cores = 2, log_lik=TRUE)
+
+model7 <- ulam(
+    alist(
+        fish_caught ~ dzipois(p, lambda),
+        logit(p) <- ap + BpP*persons,
+        log(lambda) <- loghours + al + BlB*livebait + BlP*persons,
+        ap ~ dnorm(0,1),
+        c(BpP) ~ dnorm(0,1),
+        c(BlB, BlP) ~ dnorm(0,1),
+        al ~ dnorm(0,0.5)
+        ),
+    data = d, chains = 2, cores = 2, log_lik=TRUE)
+
+compare(model0, model1, model2, model3, model4, model5, model6, model7, func = WAIC)
+#Model 7 seems to give the best predictions
+
+plot(coeftab(model0, model1, model2, model3, model4, model5, model6, model7))
+
+##Plotting some model predictions
+
+post <- extract.samples(model7)
+
+fishprob <- data.frame(persons = 1:4, fishprob = rep(0,4), fplow <- rep(0,4), fphigh <- rep(0,4))
+colnames(fishprob) <- c("persons", "fishprob", "fp.lower", "fp.upper")
+for(i in 1:4) {
+    modelpred <- quantile(logistic(post$ap + i*post$BpP), probs = c(0.025, 0.5, 0.975))
+    fishprob[i,2] <- modelpred[2]
+    fishprob[i,3] <- modelpred[1]
+    fishprob[i,4] <- modelpred[3]
+}
+
+ggplot(fishprob, aes(x = persons, y = fishprob, ymin = fp.lower, ymax = fp.upper)) +
+    geom_pointrange() +
+    ylab("Probability of fishing") +
+    xlab("Number of adults in group")   
+
+
