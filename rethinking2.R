@@ -3464,3 +3464,426 @@ ggplot(fishprob, aes(x = persons, y = fishprob, ymin = fp.lower, ymax = fp.upper
     xlab("Number of adults in group")   
 
 
+### * Chapter 13
+
+#Multilevel models
+data(reedfrogs)
+d <- reedfrogs
+
+# make the tank cluster variable
+d$tank <- 1:nrow(d)
+dat <- list(
+S = d$surv,
+N = d$density,
+tank = d$tank )
+
+m13.1 <- ulam(
+alist(
+S ~ dbinom( N , p ),
+logit(p) <- a[tank],
+a[tank] ~ dnorm(0, 1.5)
+), data=dat, chains=4, log_lik=TRUE)
+
+precis(m13.1, depth = 2)
+
+#bookmark 418
+
+m13.2 <- ulam(
+alist(
+    S ~ dbinom(N, p) ,
+    logit(p) <- a[tank],
+    a[tank] ~ dnorm(a_bar, sigma),
+    a_bar ~ dnorm(0, 1.5),
+    sigma ~ dexp( 1 )
+), data=dat , chains=4 , log_lik=TRUE )
+
+#bookmark 440
+#Practise
+
+### ** Practise problems
+
+### *** Difficulty level: Easy
+
+#13E1
+#(a) a[tank] ~ N(0,1) will produce more shrinkage, because sd of prior is smaller
+
+#13E2
+#y_i ~ Bin(1,p_i)
+#logit(p_i) = a[group] + B*x
+#a[group] ~ N(a_bar, sigma_a)
+#a_bar ~ N(0.1)
+#sigma_a ~ exp(1)
+#B ~ N(0,1)
+
+#13E3
+#y_I ~ N(mu, sigma)
+#mu = a[group] + B*x
+#a[group] ~ N(a_bar, sigma_a)
+#a_bar ~ N(0,1)
+#B ~ N(0,1)
+#sigma_a ~ exp(1)
+#sigma ~ hC(0,2)
+
+#13E4
+#y ~ P(lambda)
+#log(lambda) = a[group] + B*x
+#a[group] ~ N(a_bar, sigma_a)
+#a_bar ~ N(0,1)
+#sigma_a ~ exp(1)
+#B ~ N(0,1)
+
+#13E5
+#y ~ P(lambda)
+#log(lambda) = a[group] + b[block] + B*x
+#a[group] ~ N(a_bar, sigma_a)
+#a_bar ~ N(0,1)
+#sigma_a ~ exp(1)
+#b[block] ~ N(b_bar, sigma_b)
+#b_bar ~ N(0,1)
+#sigma_b ~ exp(1)
+#B ~ N(0,1)
+
+### *** Difficulty level: Medium
+
+#13M1
+
+#Multilevel models
+data(reedfrogs)
+d <- reedfrogs
+
+# make the tank cluster variable
+d$tank <- 1:nrow(d)
+dat <- list(
+S = d$surv,
+N = d$density,
+tank = d$tank,
+predint = as.integer(ifelse(d$pred == "pred", 1, 2)),
+bigint = as.integer(ifelse(d$size == "big", 1, 2)),
+predxbig = as.integer(interaction(d$pred, d$size)))
+
+model1 <- ulam(
+alist(
+    S ~ dbinom(N, p),
+    logit(p) <- a[tank],
+    a[tank] ~ dnorm(a_bar, sigma),
+    a_bar ~ dnorm(0, 1.5),
+    sigma ~ dexp( 1 )
+), data=dat , chains=4 , log_lik=TRUE )
+
+#Model with predation included
+model2 <- ulam(
+    alist(
+        S ~ dbinom(N, p),
+        logit(p) <- a[tank] + b[predint],
+        a[tank] ~ dnorm(a_bar, sigma),
+        a_bar ~ dnorm(0, 1.5),
+        sigma ~ dexp(1),
+        b[predint] ~ dnorm(0, 1)
+        ), data = dat, chains = 4, log_lik=TRUE)
+
+#Model with size included
+model3 <- ulam(
+    alist(
+        S ~ dbinom(N, p),
+        logit(p) <- a[tank] + b[bigint],
+        a[tank] ~ dnorm(a_bar, sigma),
+        a_bar ~ dnorm(0, 1.5),
+        sigma ~ dexp(1),
+        b[bigint] ~ dnorm(0,1)
+        ), data = dat, chains = 4, log_lik=TRUE)
+
+#Model with both main effects
+model4 <- ulam(
+    alist(
+        S ~ dbinom(N, p),
+        logit(p) <- a[tank] + bp[predint] + bb[bigint],
+        a[tank] ~ dnorm(a_bar, sigma),
+        a_bar ~ dnorm(0, 1.5),
+        sigma ~ dexp(1),
+        bb[bigint] ~ dnorm(0,1),
+        bp[predint] ~ dnorm(0,1)
+        ), data = dat, chains = 4, log_lik=TRUE)
+
+
+#Model with main effects and their interaction
+model5 <- ulam(
+    alist(
+        S ~ dbinom(N, p),
+        logit(p) <- a[tank] + bpb[predxbig],
+        a[tank] ~ dnorm(a_bar, sigma),
+        a_bar ~ dnorm(0, 1.5),
+        sigma ~ dexp(1),
+        bpb[predxbig] ~ dnorm(0,1)
+        ), data = dat, chains = 4, log_lik=TRUE)
+
+##Comparing the variation due to different tanks in the different models
+
+rbind(precis(model1)[2,], precis(model2)[2,], precis(model3)[2,], precis(model4)[2,], precis(model5)[2,])
+
+##In the models, where treatment effects are included there is less variation left that is observed between the tanks.
+
+#13M2
+
+compare(model1, model2, model3, model4, model5, func = WAIC)
+
+# extract Stan samples
+post <- extract.samples(model1)
+# compute median intercept for each tank
+# also transform to probability with logistic
+d$propsurv.est <- logistic( apply( post[['a']] , 2 , median ) )
+
+##For model2
+post2 <- extract.samples(model2)
+
+
+m2survpred <- logistic(apply( post2[['a']], 2, median) + apply(post2[['b']], 2, median)[1]*ifelse(d$pred == "pred", 1, 0) + apply(post2[['b']], 2, median)[2]*ifelse(d$pred == "no", 1, 0) )
+
+# display raw proportions surviving in each tank
+plot( d$propsurv , ylim=c(0,1) , pch=16 , xaxt="n" ,
+xlab="tank" , ylab="proportion survival" , col=rangi2 )
+axis( 1 , at=c(1,16,32,48) , labels=c(1,16,32,48) )
+# overlay posterior medians
+points( d$propsurv.est )
+points(m2survpred, col = "orange")
+
+#13M3
+
+model1 <- ulam(
+alist(
+    S ~ dbinom(N, p),
+    logit(p) <- a[tank],
+    a[tank] ~ dnorm(a_bar, sigma),
+    a_bar ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+), data=dat , chains=4 , log_lik=TRUE )
+
+modelC <- ulam(
+alist(
+    S ~ dbinom(N, p),
+    logit(p) <- a[tank],
+    a[tank] ~ dcauchy(a_bar, sigma),
+    a_bar ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+), data=dat , chains=4 , log_lik=TRUE )
+
+# extract Stan samples
+post <- extract.samples(model1)
+# compute median intercept for each tank
+# also transform to probability with logistic
+d$propsurv.est <- logistic( apply( post[['a']] , 2 , median ) )
+post2 <- extract.samples(modelC)
+d$propsurv.est2 <- logistic(apply(post2[['a']], 2, median))
+
+# display raw proportions surviving in each tank
+plot( d$propsurv , ylim=c(0,1) , pch=16 , xaxt="n" ,
+xlab="tank" , ylab="proportion survival" , col=rangi2 )
+axis( 1 , at=c(1,16,32,48) , labels=c(1,16,32,48) )
+# overlay posterior medians
+points( d$propsurv.est )
+points(d$propsurv.est2, col = "red") #Estimates using Cauchy
+
+#Distribution for tanks
+precis(model1)
+precis(modelC)
+
+
+temp <- curve(dcauchy(x, location = 1.42, scale = 1.01), from = -3, to = 5)
+curve(dnorm(x, mean = 1.29, sd = 1.61), from = -3, to = 5) #Normal distribution
+lines(temp$x, temp$y, col = "red")
+
+
+#13M4
+
+data(chimpanzees)
+d <- chimpanzees
+d$treatment <- 1 + d$prosoc_left + 2*d$condition
+dat_list <- list(
+pulled_left = d$pulled_left,
+actor = d$actor,
+block_id = d$block,
+treatment = as.integer(d$treatment) )
+
+m13.4 <- ulam(
+alist(
+pulled_left ~ dbinom( 1 , p ) ,
+logit(p) <- a[actor] + g[block_id] + b[treatment] ,
+b[treatment] ~ dnorm( 0 , 0.5 ),
+## adaptive priors
+a[actor] ~ dnorm( a_bar , sigma_a ),
+g[block_id] ~ dnorm( 0 , sigma_g ),
+## hyper-priors
+a_bar ~ dnorm( 0 , 1.5 ),
+sigma_a ~ dexp(1),
+sigma_g ~ dexp(1)
+) , data=dat_list , chains=4 , cores=4 , log_lik=TRUE )
+
+m13.4mod <- ulam(
+alist(
+pulled_left ~ dbinom( 1 , p ) ,
+logit(p) <- a[actor] + g[block_id] + b[treatment] ,
+b[treatment] ~ dnorm( 0 , 0.5 ),
+## adaptive priors
+a[actor] ~ dnorm( a_bar , sigma_a ),
+g[block_id] ~ dnorm( g_bar , sigma_g ),
+## hyper-priors
+a_bar ~ dnorm( 0 , 1.5 ),
+g_bar ~ dnorm(0, 1.5),
+sigma_a ~ dexp(1),
+sigma_g ~ dexp(1)
+) , data=dat_list , chains=4 , cores=4 , log_lik=TRUE )
+
+plot(coeftab(m13.4, m13.4mod)) 
+
+##In the model m13.4mod a_bar and g_bar (and actor and block) are not identifiable (same as in the previous left leg, right leg example)
+
+### *** Difficulty level: Hard
+
+#13H1
+data(bangladesh)
+d <- list(district_id = as.integer(as.factor(bangladesh$district)), contraception = bangladesh$use.contraception, urb = ifelse(bangladesh$urban == 0, 1, 2) )
+#d$district_id <- as.integer(as.factor(d$district))
+#d$urb <- ifelse(d$urban == 0, 1, 2)
+
+library(dplyr)
+
+##Calculate the probability of using contraception by district
+d.groups <- group_by(bangladesh, district)
+dtest <- summarise(d.groups, obs = n(), prob.cont = sum(use.contraception)/obs)
+
+#Model with only "fixed" effects
+model1 <- ulam(
+    alist(
+        contraception ~ dbinom(1,p),
+        logit(p) <- a_dist[district_id],
+        a_dist[district_id] ~ dnorm(0,1)
+        ),
+    data = d, chains = 4, cores = 4, log_lik = TRUE)
+
+model2 <- ulam(
+    alist(
+        contraception ~ dbinom(1,p),
+        logit(p) <- a_dist[district_id],
+        a_dist[district_id] ~ dnorm(a_bar, sigma_a),
+        a_bar ~ dnorm(0,1),
+        sigma_a ~ dexp(1)
+    ),
+    data = d, chains = 4, cores = 4, log_lik = TRUE)
+
+post1 <- extract.samples(model1)
+model1.prob.cont <- logistic( apply(post1[[1]], 2, median))
+
+post2 <- extract.samples(model2)
+model2.prob.cont <- logistic( apply(post2[['a_dist']], 2, median) )
+
+#Plotting
+ggplot(dtest, aes(x = district, y = prob.cont, size = obs)) +
+    geom_point() +
+    geom_point(aes(x = dtest$district, y = model1.prob.cont), size = 5, color = "red", shape = 21) +
+    geom_point(aes(x = dtest$district, y = model2.prob.cont), size = 5, color = "blue", shape = 21) +
+    xlab("District ID") +
+    ylab("P(contraception)")
+
+
+#There is more shrinkage towards the mean in the multilevel model, especially in those districts with few observations.
+
+#13H2
+
+data(Trolley)
+d <- Trolley
+dat <- list(
+response=d$response,
+action=d$action,
+intention=d$intention,
+contact=d$contact,
+id=coerce_index(d$id) )
+
+#Model without unique intercepts
+model1 <- ulam(
+alist(
+response ~ dordlogit(phi,cutpoints),
+phi <- bA*action + bI*intention + bC*contact,
+c(bA,bI,bC) ~ dnorm(0,1),
+cutpoints ~ dnorm(0,1.5)
+),
+start=list( cutpoints=seq(from=-2.5,to=1.5,length.out=6) ),
+data=dat , chains=4 , cores=4, log_lik = TRUE )
+
+#Model with unique intercepts for each individual, note that cutpoint already are the means so indi id's are ~ (0, sigma_id)
+model2 <- ulam(
+alist(
+response ~ dordlogit(phi,cutpoints),
+phi <- a_id[id] + bA*action + bI*intention + bC*contact,
+a_id[id] ~ dnorm(0,sigma_id),
+c(bA,bI,bC) ~ dnorm(0,1),
+cutpoints ~ dnorm(0,1.5),
+sigma_id ~ dexp(1)
+),
+start=list( cutpoints=seq(from=-2.5,to=1.5,length.out=6) ),
+data=dat , chains=4 , cores=4, log_lik = TRUE )
+
+compare(model1, model2, func = WAIC) #Model with individual intercepts gives better predictions
+
+coeftab(model1, model2)
+
+
+
+### * Chapter 14
+
+#bookmark 14.2
+data(chimpanzees)
+d <- chimpanzees
+d$block_id <- d$block
+d$treatment <- 1L + d$prosoc_left + 2L*d$condition
+dat <- list(
+L = d$pulled_left,
+tid = d$treatment,
+actor = d$actor,
+block_id = as.integer(d$block_id) )
+
+m14.3 <- ulam(
+alist(
+L ~ binomial(1,p),
+logit(p) <- g[tid] + alpha[actor,tid] + beta[block_id,tid],
+# adaptive priors - non-centered
+transpars> matrix[actor,4]:alpha <- compose_noncentered( sigma_actor , L_Rho_actor , z_actor ),
+transpars> matrix[block_id,4]:beta <- compose_noncentered( sigma_block , L_Rho_block , z_block ),
+matrix[4,actor]:z_actor ~ normal( 0 , 1 ),
+matrix[4,block_id]:z_block ~ normal( 0 , 1 ),
+# fixed priors
+g[tid] ~ normal(0,1),
+vector[4]:sigma_actor ~ dexp(1),
+cholesky_factor_corr[4]:L_Rho_actor ~ lkj_corr_cholesky( 2 ),
+vector[4]:sigma_block ~ dexp(1),
+cholesky_factor_corr[4]:L_Rho_block ~ lkj_corr_cholesky( 2 ),
+# compute ordinary correlation matrixes from Cholesky factors
+gq> matrix[4,4]:Rho_actor <<- Chol_to_Corr(L_Rho_actor),
+gq> matrix[4,4]:Rho_block <<- Chol_to_Corr(L_Rho_block)
+) , data=dat , chains=4 , cores=4 , log_lik=TRUE )
+
+
+#"Biologists tend to use phylogenies under a cloud of superstition and fearful button pushing"
+
+### ** Practise problems
+
+### *** Difficulty level: Easy
+
+#14E1
+
+#y_i ~ N(mu, sigma)
+#mu = a[group] + B[group]*x
+#[a[group, B[group]] ~ MVN([a,B], S)
+#S = (sigma_a, 0, 0, sigma_B) R (sigma_a, 0, 0, sigma_B)
+#a ~ N(0, 10)
+#B ~ N(0, 1)
+#sigma ~ hC(0,2)
+#sigma_a ~ hC(0,2)
+#sigma_B ~hC(0,2)
+#R ~ LKJcorr(2)
+
+#14E2
+#Intercepts and slopers could be correlated for example with size. Larger individuals tend to grow faster. If parents have provided resources to offspring, those individuals with more resources grow faster.
+
+#14E3
+#It is possible to have fewer effective parameters when variation between clusters is small. This will create shrinkage of the estimates constraining the individual varying effects parameters. Note that varying intercepts and slopes work the same way in this respect.
+
+
